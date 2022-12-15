@@ -1,8 +1,9 @@
 CC     := gcc
-CFLAGS := -Wall -Werror 
+CFLAGS := -Wall 
 
 SRCS   := client_demo.c \
-	server_demo.c 
+	server_demo.c \
+	server_yang.c
 
 OBJS   := ${SRCS:c=o}
 PROGS  := ${SRCS:.c=}
@@ -18,3 +19,6 @@ clean:
 
 %.o: %.c Makefile
 	${CC} ${CFLAGS} -c $<
+
+debug:
+	rm -f ${PROGS} ${OBJS} ; rm debug.img ; ./mkfs -f debug.img ; gcc server_yang.c udp.c -o server_yang -g -Wall
