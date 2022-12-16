@@ -30,28 +30,23 @@ int is_white_space(char c);
 char* ltrim(char *s);
 char* rtrim(char *s);
 char* trim(char *s);
-void copy_str(char* dest, char* src, int nbytes);
 
 // client code
 int main(int argc, char *argv[]) {
     signal(SIGINT, intHandler);
     // get args passed into main
-    if(argc != 3){
+    if(argc != 2){
         perror("wrong format of args into main");
         exit(1);
     }
-    int client_port = atoi(argv[1]);
-    int server_port = atoi(argv[2]);
+    int server_port = atoi(argv[1]);
 
-    struct sockaddr_in addrSnd, addrRcv;
-    sd = UDP_Open(client_port); //
-    int rc = UDP_FillSockAddr(&addrSnd, "localhost", server_port);
+    int rt = MFS_Init("localhost", server_port);
 
     char *prompt = "client> ";
     char *msg = (char*) calloc(BUFFER_SIZE, 1);
     char *rest;
     char *func_name;
-    int rt;
     write(STDOUT_FILENO, prompt, strlen(prompt));
     while(fgets(msg, BUFFER_SIZE, stdin) != NULL){
         msg = trim(msg);
@@ -59,64 +54,77 @@ int main(int argc, char *argv[]) {
             write(STDOUT_FILENO, prompt, strlen(prompt));
             continue;
         }
-
-        // rc = UDP_Write(sd, &addrSnd, msg, BUFFER_SIZE);
-        // if (rc < 0) {
-	    //     printf("client:: failed to send\n");
-        //     continue;
-        // }
-        // printf("client:: send message [%s]\n", msg);
-        // printf("client:: wait for reply...\n");
         rest = strdup(msg);
         func_name = trim(strtok_r(rest, ":", &rest));
         int npara = 0;
         while(strchr(msg, '&') != NULL) npara++;
-        if(!strcmp(func_name, "MFS_Lookup")){
-
-            rt = MFS_Lookup();
-            printf("client:: got reply\nrt = %d", rt);
+        if(!strcmp(func_name, "lookup")){
+            int pinum = trim(strtok_r(rest, "&", &rest));
+            char *name = strtok_r(rest, "&", &rest);
+            rest = name;
+            name = strtok_r(rest, "\"", &rest);
+            name = trim(strtok_r(rest, "\"", &rest));
+            rt = MFS_Lookup(pinum, name);
+            printf("client:: got reply\nrt = %d\n", rt);
         }
         
-        else if(!strcmp(func_name, "MFS_Stat")){
-            reply_state_t reply;
-            rc = UDP_Read(sd, &addrRcv, (char *)&reply, sizeof(reply_state_t));
-            printf("client:: got reply\nrt = %d\nstat.type = %d;  stat.size = %d\n", reply.rt, reply.stat.type, reply.stat.size);
+        else if(!strcmp(func_name, "stat")){
+            int inum = atoi(trim(strtok_r(rest, "&", &rest)));
+            MFS_Stat_t stat = {.type = -1, .size = -1};
+            rt = MFS_Stat(inum, &stat);
+            printf("client:: got reply\nrt = %d\nstat.type = %d;  stat.size = %d\n", rt, stat.type, stat.size);
         }
         
-        else if(!strcmp(func_name, "MFS_Write")){
-            rc = UDP_Read(sd, &addrRcv, (char *)&rt, sizeof(int));
-            printf("client:: got reply\nrt = %d", rt);
+        else if(!strcmp(func_name, "write")){
+            int inum = atoi(trim(strtok_r(rest, "&", &rest)));
+            char *wbuffer = strtok_r(rest, "&", &rest);
+            char *buffer_rest = wbuffer;
+            wbuffer = strtok_r(buffer_rest, "\"", &buffer_rest);
+            wbuffer = trim(strtok_r(buffer_rest, "\"", &buffer_rest));
+            int size = atoi(trim(strtok_r(rest, "&", &rest)));
+            int offset = atoi(trim(strtok_r(rest, "&", &rest)));
+            rt = MFS_Write(inum, wbuffer, offset, size);
+            printf("client:: got reply\nrt = %d\n", rt);
         }
         
-        else if(!strcmp(func_name, "MFS_Read")){
-            reply_read_t reply;
-            rc = UDP_Read(sd, &addrRcv, (char *)&reply, sizeof(reply_read_t));
-            printf("client:: got reply\nrt = %d\n", reply.rt);
-            if(reply.rt == 0){
-                for(int i = 0; i < 1024/32; i++){
-                    printf("%s\n", reply.buffer + i * 32);
-                }
-            }
+        else if(!strcmp(func_name, "read")){
+            int inum = atoi(trim(strtok_r(rest, "&", &rest)));
+            int size = atoi(trim(strtok_r(rest, "&", &rest)));
+            int offset = atoi(trim(strtok_r(rest, "&", &rest)));
+            char *buffer = (char *)calloc(size + 1, 1);
+            rt = MFS_Read(inum, buffer, offset, size);
+            printf("client:: got reply\nrt = %d\n", rt);
             
         }
         
-        else if(!strcmp(func_name, "MFS_Creat")){
-            rc = UDP_Read(sd, &addrRcv, (char *)&rt, sizeof(int));
-            printf("client:: got reply\nrt = %d", rt);
+        else if(!strcmp(func_name, "creat")){
+            int pinum = atoi(trim(strtok_r(rest, "&", &rest)));
+            int type = atoi(trim(strtok_r(rest, "&", &rest)));
+            char *name = strtok_r(rest, "&", &rest);
+            rest = name;
+            name = strtok_r(rest, "\"", &rest);
+            name = trim(strtok_r(rest, "\"", &rest));
+            rt = MFS_Creat(pinum, type, name);
+            printf("client:: got reply\nrt = %d\n", rt);
         }
         
-        else if(!strcmp(func_name, "MFS_Unlink")){
-            rc = UDP_Read(sd, &addrRcv, (char *)&rt, sizeof(int));
-            printf("client:: got reply\nrt = %d", rt);
+        else if(!strcmp(func_name, "unlink")){
+            int pinum = atoi(trim(strtok_r(rest, "&", &rest)));
+            char *name = strtok_r(rest, "&", &rest);
+            rest = name;
+            name = strtok_r(rest, "\"", &rest);
+            name = trim(strtok_r(rest, "\"", &rest));
+            rt = MFS_Unlink(pinum, name);
+            printf("client:: got reply\nrt = %d\n", rt);
         }
         
-        else if(!strcmp(func_name, "MFS_Shutdown")){
-            rc = UDP_Read(sd, &addrRcv, (char *)&rt, sizeof(int));
-            printf("client:: got reply\nrt = %d", rt);
+        else if(!strcmp(func_name, "shutdown")){
+            rt = MFS_Shutdown();
+            printf("client:: got reply\nrt = %d\n", rt);
         }
         
         else {
-
+            printf("Invalid function name!\n");
         }
         write(STDOUT_FILENO, prompt, strlen(prompt));
     }
@@ -148,10 +156,4 @@ char *rtrim(char *s) {
 
 char *trim(char *s) {
     return rtrim(ltrim(s)); 
-}
-
-void copy_str(char* dest, char* src, int nbytes) {
-    for(int i = 0; i < nbytes; i++) {
-        dest[i] = src[i];
-    }
 }
