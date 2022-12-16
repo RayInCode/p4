@@ -1,20 +1,32 @@
-CC     := gcc
-CFLAGS := -Wall -Werror 
+TARGET = server
 
-SRCS   := client_demo.c \
-	server_demo.c 
+CC = gcc
+CFLAGS = -g -Wall
+current_dir := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
+.SUFFIXES: .c .o
 
-OBJS   := ${SRCS:c=o}
-PROGS  := ${SRCS:.c=}
+all: server client mkfs libmfs.so
 
-.PHONY: all
-all: ${PROGS}
+server: server.c udp.o
+	$(CC) $(CFLAGS) -fPIC server.c -o server udp.o
 
-${PROGS} : % : %.o Makefile
-	${CC} $< -o $@ udp.c
+udp.o: udp.c udp.h
+	$(CC) $(CFLAGS) -fPIC -c udp.c
+    
+libmfs.o: libmfs.c mfs.h udp.h
+	$(CC) $(CFLAGS) -fPIC -c libmfs.c
+
+mkfs.o: mkfs.c ufs.h 
+	$(CC) $(CFLAGS) -fPIC -c mkfs.c
+    
+libmfs.so: libmfs.o mkfs.o udp.o
+	$(CC) -shared -o libmfs.so libmfs.o mkfs.o udp.o
+
+mkfs: mkfs.c ufs.h
+	$(CC) -o mkfs mkfs.c
+
+client: client.c libmfs.so
+	$(CC) -L$(current_dir) $(CFLAGS) client.c -g -o client -lmfs
 
 clean:
-	rm -f ${PROGS} ${OBJS}
-
-%.o: %.c Makefile
-	${CC} ${CFLAGS} -c $<
+	-rm -f $(OBJS) server client mkfs libmfs.so *.img *.o *~
