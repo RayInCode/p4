@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
         int npara = 0;
         while(strchr(msg, '&') != NULL) npara++;
         if(!strcmp(func_name, "lookup")){
-            int pinum = trim(strtok_r(rest, "&", &rest));
+            int pinum = atoi(trim(strtok_r(rest, "&", &rest)));
             char *name = strtok_r(rest, "&", &rest);
             rest = name;
             name = strtok_r(rest, "\"", &rest);

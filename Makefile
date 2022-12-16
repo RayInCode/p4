@@ -19,8 +19,8 @@ libmfs.o: libmfs.c mfs.h udp.h
 mkfs.o: mkfs.c ufs.h 
 	$(CC) $(CFLAGS) -fPIC -c mkfs.c
     
-libmfs.so: libmfs.o mkfs.o udp.o
-	$(CC) -shared -o libmfs.so libmfs.o mkfs.o udp.o
+libmfs.so: libmfs.o udp.o
+	$(CC) -shared -o libmfs.so libmfs.o udp.o
 
 mkfs: mkfs.c ufs.h
 	$(CC) -o mkfs mkfs.c
