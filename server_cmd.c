@@ -4,9 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
 #include <sys/stat.h>
 #include <sys/types.h>
  #include <sys/mman.h>
+
 #include "udp.h"
 #include "ufs.h"
 #include "mfs.h"
@@ -36,6 +38,16 @@ typedef struct {
     int size;
 } stat_t;
 
+typedef struct {
+    int rt;
+    stat_t stat;
+} reply_state_t;
+
+typedef struct {
+    int rt;
+    char buffer[4096];
+} reply_read_t;
+
 int is_white_space(char c);
 char* ltrim(char *s);
 char* rtrim(char *s);
@@ -45,27 +57,7 @@ void set_bit(unsigned int *bitmap, int position);
 int get_dir_block(int block_addr, dir_block_t* dir_block);
 int find_empty_data_bit();
 void copy_str(char* dest, char* src, int nbytes);
-
-
-// enum fp {
-//     MFS_Lookup, MFS_Stat, MFS_Write, MFS_Read, MFS_Creat, MFS_Unlink, MFS_Shutdown
-// };
-
-// int MFS_Lookup(int pinum, char *name);
-// int MFS_Stat(int inum, MFS_Stat_t *m);
-// int MFS_Write(int inum, char *buffer, int offset, int nbytes);
-// int MFS_Read(int inum, char *buffer, int offset, int nbytes);
-// int MFS_Creat(int pinum, int type, char *name);
-// int MFS_Unlink(int pinum, char *name);
-// int MFS_Shutdown();
-
-// int lookup_wrapper(int arg, char *name);
-// int stat_wrapper(int inum, MFS_Stat_t *m);
-// int write_wrapper(int inum, char *buffer, int offset, int nbytes);
-// int read_wrapper(int inum, char *buffer, int offset, int nbytes);
-// int creat_wrapper(int pinum, int type, char *name);
-// int unlink_wrapper(int pinum, char *name);
-// int shutdown_wrapper();
+void intHandler(int dummy);
 
 int ufs_lookup(int parent_inum, char *name);
 int ufs_stat(int inum, stat_t *stat);
@@ -75,44 +67,34 @@ int ufs_creat(int parent_inum, int type, char *name);
 int ufs_unlink(int parent_inum, char *name);
 int ufs_shutdown();
 
-int sd;
+int sd;    // socket descriptor
 int fd_img;
 int total_blocks;
 int meta_blocks;
 int inodes_per_blocks;
 int bits_per_block;
 char *meta_ptr;
-char *fname_img;
 char *prompt = "server> ";
 super_t super;
 super_t *super_ptr;
 bitmap_t *inode_bitmap_ptr, *data_bitmap_ptr;
 inode_block *inode_table_ptr;
 
-
-
-
-void intHandler(int dummy);
-
-int main(int argc, char* argv[]){
-    // char src[10] = "asd\0sdfkj";
-    // char dest[10] = "11111111";
-    // copy_str(dest, src, 8);
-    // printf("%s\n", dest);
-
+int main(int argc, char* argv[]) {
     signal(SIGINT, intHandler);
+    int rc;
+    int rt;
     inodes_per_blocks = UFS_BLOCK_SIZE / sizeof(inode_t);
     bits_per_block = UFS_BLOCK_SIZE * 8;
-    int portnum;
-    int rc;
 
     // get args passed into main
     if(argc != 3){
-        perror("wrong args into main");
+        perror("wrong format of args into main");
         exit(1);
     }
-    portnum = atoi(argv[1]);
-    fname_img = argv[2];
+    int portnum = atoi(argv[1]);
+    char *fname_img = argv[2];
+
     #ifdef DEBUG
     printf("portnum:%d,  file_system_image:%s\n", portnum, fname_img);
     #endif
@@ -129,13 +111,13 @@ int main(int argc, char* argv[]){
         perror("failed to read super block from img file");
         exit(1);
     }
+    
     meta_blocks = super.inode_region_addr + super.inode_region_len; 
     total_blocks = super.data_region_addr + super.num_data; 
     super_ptr = (super_t *)mmap(NULL, meta_blocks * UFS_BLOCK_SIZE, PROT_WRITE, MAP_PRIVATE, fd_img, 0);
     inode_bitmap_ptr = (bitmap_t *)super_ptr + 1;
     data_bitmap_ptr = inode_bitmap_ptr + super.inode_bitmap_len;
     inode_table_ptr = (inode_block *)(data_bitmap_ptr + super.data_bitmap_len);
-
 
     // check super in mmap
     #ifdef DEBUG
@@ -152,38 +134,57 @@ int main(int argc, char* argv[]){
     // assert(data_bitmap_ptr->bits[0] == 0x1 << 31);
     // assert(inode_table_ptr->inodes[0].type == 0 && inode_table_ptr->inodes[0].size == 2 * sizeof(dir_ent_t) && inode_table_ptr->inodes[0].direct[0] == super.data_region_addr);
     #endif
-
-    char *msg = (char*)calloc(1024,1);
+    
+    // set up UDP socket file and bind with a socket address (port, internet address)
+    sd = UDP_Open(portnum);
+    assert(sd > -1);
+    struct sockaddr_in addr;
+    char *msg = (char *)calloc(1024,1);
     char *rest;
     char *func_name;
-    write(STDOUT_FILENO, prompt, strlen(prompt));
-    while(fgets(msg, 1024, stdin) != NULL){
+
+    while(1) {
+        printf("\nserver:: waiting...\n");
+        rc = UDP_Read(sd, &addr, msg, 1024);
+        assert(rc == 1024);
+        printf("server:: read message [size:%d contents:(%s)]\n", rc, msg);
+       
         msg = trim(msg);
         if(strlen(msg) == 0){
             write(STDOUT_FILENO, prompt, strlen(prompt));
             continue;
         }
         rest = strdup(msg);
-        char *temp = strtok_r(rest, ":", &rest);
-        func_name = trim(temp);
+        func_name = trim(strtok_r(rest, ":", &rest));
+
         if(!strcmp(func_name, "MFS_Lookup")){
             int inum = atoi(trim(strtok_r(rest, "&", &rest)));
             char *name = strtok_r(rest, "&", &rest);
             rest = name;
             name = strtok_r(rest, "\"", &rest);
             name = trim(strtok_r(rest, "\"", &rest));
-            rc = ufs_lookup(inum, name);
-            printf("%s    return:%d\n\n", msg, rc);
+
+            rt = ufs_lookup(inum, name);
+            rc = UDP_Write(sd, &addr, (char *)&rt, sizeof(int));
+            printf("server:: reply message [%s]\n", msg);
+            printf("reply content:\nrt = %d\n", rt);
         }
-        
+
         else if(!strcmp(func_name, "MFS_Stat")){
             int inum = atoi(trim(strtok_r(rest, "&", &rest)));
             stat_t stat = {.type = -1, .size = -1};
-            rc = ufs_stat(inum, &stat);
-            printf("%s    return:%d\nstat.type = %d; stat.size = %d\n\n", msg, rc, stat.type, stat.size);
+            reply_state_t reply_stat;
+
+            rt = ufs_stat(inum, &stat);
+            reply_stat.rt = rt;
+            reply_stat.stat = stat;
+            rc = UDP_Write(sd, &addr, (char *)&reply_stat, sizeof(reply_state_t));
+            printf("server:: reply message [%s]\n", msg);
+            printf("reply content:\nreplay.rt = %d;\treplay.stat.type = %d;\treply.stat.size = %d\n", reply_stat.rt, reply_stat.stat.type, reply_stat.stat.size);
         }
-        
+
         else if(!strcmp(func_name, "MFS_Write")){
+            // parse command to get paras
             int inum = atoi(trim(strtok_r(rest, "&", &rest)));
             char *wbuffer = strtok_r(rest, "&", &rest);
             char *buffer_rest = wbuffer;
@@ -191,30 +192,46 @@ int main(int argc, char* argv[]){
             wbuffer = trim(strtok_r(buffer_rest, "\"", &buffer_rest));
             int size = atoi(trim(strtok_r(rest, "&", &rest)));
             int offset = atoi(trim(strtok_r(rest, "&", &rest)));
-            rc = ufs_write(inum,wbuffer, size, offset);
-            printf("%s    return:%d\n", msg, rc);
-            char *buffer = (char *)calloc(size, 1);
-            rc = ufs_read(inum, buffer, size, offset);
+
+            rt = ufs_write(inum,wbuffer, size, offset);
+            rc = UDP_Write(sd, &addr, (char *)&rt, sizeof(int));
+            printf("server:: reply message [%s]\n", msg);
+            printf("reply content:\nrt = %d\n", rt);
+            
+            // read written part from file to check
+            printf("check the written zone:");
+            int inode_size = inode_table_ptr->inodes[inum].size;
+            char *buffer = (char *)calloc(inode_size + 1, 1);
+            rt = ufs_read(inum, buffer, inode_size, 0);
             if(inode_table_ptr->inodes[inum].type == UFS_DIRECTORY) {
                 dir_ent_t dir_ent;
-                for(int i =0; i < size/32; i++) {
+                for(int i =0; i < inode_size/32; i++) {
                     strncpy((char*)(&dir_ent), buffer + i*32, 32);
                     printf("[%d] inum = %d;\tname = %s\n", i, dir_ent.inum, dir_ent.name);
                 }
             }else {
-                buffer[size] = '\0';
+                buffer[inode_size] = '\0';
                 printf("%s\n", buffer);
             }
             printf("\n");           
         }
-        
+
         else if(!strcmp(func_name, "MFS_Read")){
             int inum = atoi(trim(strtok_r(rest, "&", &rest)));
             int size = atoi(trim(strtok_r(rest, "&", &rest)));
             int offset = atoi(trim(strtok_r(rest, "&", &rest)));
             char *buffer = (char *)calloc(size + 1, 1);
-            rc = ufs_read(inum, buffer, size, offset);
-            printf("%s    return:%d\n", msg, rc);
+            reply_read_t reply_read;
+
+            rt = ufs_read(inum, buffer, size, offset);
+            reply_read.rt = rt;
+            copy_str(reply_read.buffer, buffer, size);
+            rc = UDP_Write(sd, &addr, (char *)&reply_read, sizeof(reply_read_t)); 
+
+            printf("server:: reply message [%s]\n", msg);
+            printf("reply content:\n");
+            printf("reply.rt = %d\n", reply_read.rt);
+            printf("reply.buffer:\n");
             if(inode_table_ptr->inodes[inum].type == UFS_DIRECTORY) {
                 dir_ent_t dir_ent;
                 for(int i =0; i < size/32; i++) {
@@ -235,8 +252,14 @@ int main(int argc, char* argv[]){
             rest = name;
             name = strtok_r(rest, "\"", &rest);
             name = trim(strtok_r(rest, "\"", &rest));
-            rc = ufs_creat(inum, type, name);
-            printf("%s    return:%d\n", msg, rc);
+
+            rt = ufs_creat(inum, type, name);
+            rc = UDP_Write(sd, &addr, (char *)&rt, sizeof(int));
+
+            printf("server:: reply message [%s]\n", msg);
+            printf("reply content:\nrt = %d\n", rt);
+    
+            printf("check the basic info about inode created currently\n");
             int new_inum = ufs_lookup(inum, name);
             printf("inum of  created file:%d\n", new_inum);
             stat_t stat;
@@ -244,7 +267,6 @@ int main(int argc, char* argv[]){
             printf("get state of parent directory:%d\nstat.type = %d; stat.size = %d\n", rc, stat.type, stat.size);
             rc = ufs_stat(new_inum, &stat);
             printf("get state of created file:%d\nstat.type = %d; stat.size = %d\n\n", rc, stat.type, stat.size);           
-            //TODO: ufs_read()
         }
         
         else if(!strcmp(func_name, "MFS_Unlink")){
@@ -253,22 +275,41 @@ int main(int argc, char* argv[]){
             rest = name;
             name = strtok_r(rest, "\"", &rest);
             name = trim(strtok_r(rest, "\"", &rest));
-            rc = ufs_unlink(parent_inum, name);
-            printf("%s    return:%d\n\n", msg, rc);
+
+            rt = ufs_unlink(parent_inum, name);
+            rc = UDP_Write(sd, &addr, (char *)&rt, sizeof(int));
+
+            printf("server:: reply message [%s]\n", msg);
+            printf("reply content:\nrt = %d\n", rt);
+
+            printf("check the basic info of given direct");
+            stat_t stat;
+            rc = ufs_stat(parent_inum, &stat);
+            printf("get state of parent directory:%d\nstat.type = %d; stat.size = %d\n", rc, stat.type, stat.size);
+            int inode_size = inode_table_ptr->inodes[parent_inum].size;
+            char *buffer = (char *)calloc(inode_size + 1, 1);
+            rt = ufs_read(parent_inum, buffer, inode_size, 0);
+            if(inode_table_ptr->inodes[parent_inum].type == UFS_DIRECTORY) {
+                dir_ent_t dir_ent;
+                for(int i =0; i < inode_size/32; i++) {
+                    strncpy((char*)(&dir_ent), buffer + i*32, 32);
+                    printf("[%d] inum = %d;\tname = %s\n", i, dir_ent.inum, dir_ent.name);
+                }
+            }else {
+                buffer[inode_size] = '\0';
+                printf("%s\n", buffer);
+            }
+            printf("\n");
         }
-        
+
         else if(!strcmp(func_name, "MFS_Shutdown")){
-            ufs_shutdown();
-            UDP_Close(sd);
+            rt = ufs_shutdown();
+            rc = UDP_Write(sd, &addr, (char *)&rt, sizeof(int));
+            printf("server:: reply message [%s]\n", msg);
+            printf("reply content:\nrt = %d\n", rt);
             exit(0);
         }
-        
-        else {
-
-        }
-        write(STDOUT_FILENO, prompt, strlen(prompt));
     }
-
 
     (void) close(fd_img);
     return 0;
@@ -286,7 +327,6 @@ int is_white_space(char c) {
 }
 
 char *ltrim(char *s) {
-
     while(*s != '\0' && is_white_space(*s) ) s++;
     return s;
 }
@@ -903,5 +943,5 @@ int ufs_read(int inum, char *buffer, int nbytes, int offset) {
 int ufs_shutdown() {
     (void) fsync(fd_img);
     (void) close(fd_img);
-    exit(0);
+    return 0;
 }

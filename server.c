@@ -4,9 +4,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
 #include <sys/stat.h>
 #include <sys/types.h>
  #include <sys/mman.h>
+
 #include "udp.h"
 #include "ufs.h"
 #include "mfs.h"
@@ -18,6 +20,8 @@
 // #ifndef REGION
 // #define REGION
 // #endif
+
+enum functions{Lookup, Stat, Write, Read, Creat, Unlink, Shutdown};
 
 typedef struct {
     unsigned int bits[UFS_BLOCK_SIZE / sizeof(unsigned int)];
@@ -36,36 +40,25 @@ typedef struct {
     int size;
 } stat_t;
 
-int is_white_space(char c);
-char* ltrim(char *s);
-char* rtrim(char *s);
-char* trim(char *s);
-unsigned int get_bit(unsigned int *bitmap, int position);
-void set_bit(unsigned int *bitmap, int position);
-int get_dir_block(int block_addr, dir_block_t* dir_block);
+typedef struct {
+    enum functions func;
+    int pinum;
+    char name[28];
+    int inum;
+    stat_t stat;
+    char buffer[UFS_BLOCK_SIZE];
+    int offset;
+    int nbytes;
+    int type;
+    int rt;
+} message_t;
+
+unsigned int get_bit(unsigned int *, int);
+void set_bit(unsigned int *, int);
+int get_dir_block(int, dir_block_t*);
 int find_empty_data_bit();
-void copy_str(char* dest, char* src, int nbytes);
-
-
-// enum fp {
-//     MFS_Lookup, MFS_Stat, MFS_Write, MFS_Read, MFS_Creat, MFS_Unlink, MFS_Shutdown
-// };
-
-// int MFS_Lookup(int pinum, char *name);
-// int MFS_Stat(int inum, MFS_Stat_t *m);
-// int MFS_Write(int inum, char *buffer, int offset, int nbytes);
-// int MFS_Read(int inum, char *buffer, int offset, int nbytes);
-// int MFS_Creat(int pinum, int type, char *name);
-// int MFS_Unlink(int pinum, char *name);
-// int MFS_Shutdown();
-
-// int lookup_wrapper(int arg, char *name);
-// int stat_wrapper(int inum, MFS_Stat_t *m);
-// int write_wrapper(int inum, char *buffer, int offset, int nbytes);
-// int read_wrapper(int inum, char *buffer, int offset, int nbytes);
-// int creat_wrapper(int pinum, int type, char *name);
-// int unlink_wrapper(int pinum, char *name);
-// int shutdown_wrapper();
+void display_msg(message_t *);
+void intHandler(int);
 
 int ufs_lookup(int parent_inum, char *name);
 int ufs_stat(int inum, stat_t *stat);
@@ -75,44 +68,31 @@ int ufs_creat(int parent_inum, int type, char *name);
 int ufs_unlink(int parent_inum, char *name);
 int ufs_shutdown();
 
-int sd;
+int sd;    // socket descriptor
 int fd_img;
 int total_blocks;
-int meta_blocks;
 int inodes_per_blocks;
 int bits_per_block;
 char *meta_ptr;
-char *fname_img;
-char *prompt = "server> ";
 super_t super;
 super_t *super_ptr;
 bitmap_t *inode_bitmap_ptr, *data_bitmap_ptr;
 inode_block *inode_table_ptr;
 
-
-
-
-void intHandler(int dummy);
-
-int main(int argc, char* argv[]){
-    // char src[10] = "asd\0sdfkj";
-    // char dest[10] = "11111111";
-    // copy_str(dest, src, 8);
-    // printf("%s\n", dest);
-
+int main(int argc, char* argv[]) {
     signal(SIGINT, intHandler);
+    int rc;
     inodes_per_blocks = UFS_BLOCK_SIZE / sizeof(inode_t);
     bits_per_block = UFS_BLOCK_SIZE * 8;
-    int portnum;
-    int rc;
 
     // get args passed into main
     if(argc != 3){
-        perror("wrong args into main");
+        perror("wrong format of args into main");
         exit(1);
     }
-    portnum = atoi(argv[1]);
-    fname_img = argv[2];
+    int portnum = atoi(argv[1]);
+    char *fname_img = argv[2];
+
     #ifdef DEBUG
     printf("portnum:%d,  file_system_image:%s\n", portnum, fname_img);
     #endif
@@ -129,226 +109,136 @@ int main(int argc, char* argv[]){
         perror("failed to read super block from img file");
         exit(1);
     }
-    meta_blocks = super.inode_region_addr + super.inode_region_len; 
+
     total_blocks = super.data_region_addr + super.num_data; 
-    super_ptr = (super_t *)mmap(NULL, meta_blocks * UFS_BLOCK_SIZE, PROT_WRITE, MAP_PRIVATE, fd_img, 0);
+    super_ptr = (super_t *)mmap(NULL, super.data_region_addr * UFS_BLOCK_SIZE, PROT_WRITE, MAP_PRIVATE, fd_img, 0);
     inode_bitmap_ptr = (bitmap_t *)super_ptr + 1;
     data_bitmap_ptr = inode_bitmap_ptr + super.inode_bitmap_len;
     inode_table_ptr = (inode_block *)(data_bitmap_ptr + super.data_bitmap_len);
 
-
     // check super in mmap
     #ifdef DEBUG
-    printf("total blocks        %d\n", 1 + super_ptr->inode_bitmap_len + super_ptr->data_bitmap_len + super_ptr->inode_region_len + super_ptr->data_region_len);
-    printf("  inodes            %d [size of each: %lu]\n", super_ptr->num_inodes, sizeof(inode_t));
-    printf("  data blocks       %d\n", super_ptr->num_data);
+    printf("total blocks        %d\n", 1 + super.inode_bitmap_len + super.data_bitmap_len + super.inode_region_len + super.data_region_len);
+    printf("  inodes            %d [size of each: %lu]\n", super.num_inodes, sizeof(inode_t));
+    printf("  data blocks       %d\n", super.num_data);
     printf("layout details\n");
-    printf("  inode bitmap address/len %d [%d]\n", super_ptr->inode_bitmap_addr, super_ptr->inode_bitmap_len);
-    printf("  data bitmap address/len  %d [%d]\n", super_ptr->data_bitmap_addr, super_ptr->data_bitmap_len);
+    printf("  inode bitmap address/len %d [%d]\n", super.inode_bitmap_addr, super.inode_bitmap_len);
+    printf("  data bitmap address/len  %d [%d]\n", super.data_bitmap_addr, super.data_bitmap_len);
 
-    // assert(super.num_data == super_ptr->num_data);
-    // assert(super.num_inodes == super_ptr->num_inodes);
+    // assert(super.num_data == super.num_data);
+    // assert(super.num_inodes == super.num_inodes);
     // assert(inode_bitmap_ptr->bits[0] == (0x1 << 31));
     // assert(data_bitmap_ptr->bits[0] == 0x1 << 31);
     // assert(inode_table_ptr->inodes[0].type == 0 && inode_table_ptr->inodes[0].size == 2 * sizeof(dir_ent_t) && inode_table_ptr->inodes[0].direct[0] == super.data_region_addr);
     #endif
-
-    char *msg = (char*)calloc(1024,1);
-    char *rest;
-    char *func_name;
-    write(STDOUT_FILENO, prompt, strlen(prompt));
-    while(fgets(msg, 1024, stdin) != NULL){
-        msg = trim(msg);
-        if(strlen(msg) == 0){
-            write(STDOUT_FILENO, prompt, strlen(prompt));
-            continue;
-        }
-        rest = strdup(msg);
-        char *temp = strtok_r(rest, ":", &rest);
-        func_name = trim(temp);
-        if(!strcmp(func_name, "MFS_Lookup")){
-            int inum = atoi(trim(strtok_r(rest, "&", &rest)));
-            char *name = strtok_r(rest, "&", &rest);
-            rest = name;
-            name = strtok_r(rest, "\"", &rest);
-            name = trim(strtok_r(rest, "\"", &rest));
-            rc = ufs_lookup(inum, name);
-            printf("%s    return:%d\n\n", msg, rc);
-        }
-        
-        else if(!strcmp(func_name, "MFS_Stat")){
-            int inum = atoi(trim(strtok_r(rest, "&", &rest)));
-            stat_t stat = {.type = -1, .size = -1};
-            rc = ufs_stat(inum, &stat);
-            printf("%s    return:%d\nstat.type = %d; stat.size = %d\n\n", msg, rc, stat.type, stat.size);
-        }
-        
-        else if(!strcmp(func_name, "MFS_Write")){
-            int inum = atoi(trim(strtok_r(rest, "&", &rest)));
-            char *wbuffer = strtok_r(rest, "&", &rest);
-            char *buffer_rest = wbuffer;
-            wbuffer = strtok_r(buffer_rest, "\"", &buffer_rest);
-            wbuffer = trim(strtok_r(buffer_rest, "\"", &buffer_rest));
-            int size = atoi(trim(strtok_r(rest, "&", &rest)));
-            int offset = atoi(trim(strtok_r(rest, "&", &rest)));
-            rc = ufs_write(inum,wbuffer, size, offset);
-            printf("%s    return:%d\n", msg, rc);
-            char *buffer = (char *)calloc(size, 1);
-            rc = ufs_read(inum, buffer, size, offset);
-            if(inode_table_ptr->inodes[inum].type == UFS_DIRECTORY) {
-                dir_ent_t dir_ent;
-                for(int i =0; i < size/32; i++) {
-                    strncpy((char*)(&dir_ent), buffer + i*32, 32);
-                    printf("[%d] inum = %d;\tname = %s\n", i, dir_ent.inum, dir_ent.name);
-                }
-            }else {
-                buffer[size] = '\0';
-                printf("%s\n", buffer);
-            }
-            printf("\n");           
-        }
-        
-        else if(!strcmp(func_name, "MFS_Read")){
-            int inum = atoi(trim(strtok_r(rest, "&", &rest)));
-            int size = atoi(trim(strtok_r(rest, "&", &rest)));
-            int offset = atoi(trim(strtok_r(rest, "&", &rest)));
-            char *buffer = (char *)calloc(size + 1, 1);
-            rc = ufs_read(inum, buffer, size, offset);
-            printf("%s    return:%d\n", msg, rc);
-            if(inode_table_ptr->inodes[inum].type == UFS_DIRECTORY) {
-                dir_ent_t dir_ent;
-                for(int i =0; i < size/32; i++) {
-                    copy_str((char*)(&dir_ent), buffer + i*32, 32);
-                    printf("[%d] inum = %d;\tname = %s\n", i, dir_ent.inum, dir_ent.name);
-                }
-            }else {
-                buffer[size] = '\0';
-                printf("%s\n", buffer);
-            }
-            printf("\n");
-        }
-        
-        else if(!strcmp(func_name, "MFS_Creat")){
-            int inum = atoi(trim(strtok_r(rest, "&", &rest)));
-            int type = atoi(trim(strtok_r(rest, "&", &rest)));
-            char *name = strtok_r(rest, "&", &rest);
-            rest = name;
-            name = strtok_r(rest, "\"", &rest);
-            name = trim(strtok_r(rest, "\"", &rest));
-            rc = ufs_creat(inum, type, name);
-            printf("%s    return:%d\n", msg, rc);
-            int new_inum = ufs_lookup(inum, name);
-            printf("inum of  created file:%d\n", new_inum);
-            stat_t stat;
-            rc = ufs_stat(inum, &stat);
-            printf("get state of parent directory:%d\nstat.type = %d; stat.size = %d\n", rc, stat.type, stat.size);
-            rc = ufs_stat(new_inum, &stat);
-            printf("get state of created file:%d\nstat.type = %d; stat.size = %d\n\n", rc, stat.type, stat.size);           
-            //TODO: ufs_read()
-        }
-        
-        else if(!strcmp(func_name, "MFS_Unlink")){
-            int parent_inum = atoi(trim(strtok_r(rest, "&", &rest)));
-            char *name = strtok_r(rest, "&", &rest);
-            rest = name;
-            name = strtok_r(rest, "\"", &rest);
-            name = trim(strtok_r(rest, "\"", &rest));
-            rc = ufs_unlink(parent_inum, name);
-            printf("%s    return:%d\n\n", msg, rc);
-        }
-        
-        else if(!strcmp(func_name, "MFS_Shutdown")){
-            ufs_shutdown();
-            UDP_Close(sd);
-            exit(0);
-        }
-        
-        else {
-
-        }
-        write(STDOUT_FILENO, prompt, strlen(prompt));
-    }
-
-
-    (void) close(fd_img);
-    return 0;
-}
-
-void intHandler(int dummy) {
-    (void) fsync(fd_img);
-    (void) close(fd_img);
-    UDP_Close(sd);
-    exit(130);
-}
-
-int is_white_space(char c) {
-    return (c == ' ' || c == '\t' || c == '\n');
-}
-
-char *ltrim(char *s) {
-
-    while(*s != '\0' && is_white_space(*s) ) s++;
-    return s;
-}
-
-char *rtrim(char *s) {
-    char* back = s + strlen(s) - 1;
-    while(back >= s && is_white_space(*back)) back--;
-    *(back+1) = '\0';
-    return s;
-}
-
-char *trim(char *s) {
-    return rtrim(ltrim(s)); 
-}
-
-unsigned int get_bit(unsigned int *bitmap, int position) {
-    int index = position / 32;
-    int offset = 31 - (position % 32);
-    return (bitmap[index] >> offset) & 0x1;
-}
-
-void set_bit(unsigned int *bitmap, int position) {
-    int index = position / 32;
-    int offset = 31 - (position % 32);
-    bitmap[index] |= 0x1 << offset;
-}
-
-int get_dir_block(int block_addr, dir_block_t* dir_block) {
-    // check block bounds and data bitmaps
-    if(block_addr < meta_blocks || block_addr >= total_blocks || get_bit((data_bitmap_ptr + (block_addr-meta_blocks)/bits_per_block)->bits, (block_addr - meta_blocks)%bits_per_block) == 0) 
-        return -1;
     
-    int rc = pread(fd_img, dir_block, sizeof(dir_block_t), block_addr*UFS_BLOCK_SIZE);
-    if(rc < 0) return -1;
+    // set up UDP socket file and bind with a socket address (port, internet address)
+    sd = UDP_Open(portnum);
+    assert(sd > -1);
+    struct sockaddr_in addr;
+    message_t message, reply;
+
+    while(1) {
+        printf("\nserver:: waiting...\n");
+        memset(&message, 0, sizeof(message_t));
+        memset(&reply, 0, sizeof(message_t));
+        rc = UDP_Read(sd, &addr, (char*)&message, sizeof(message_t));
+        assert(rc == sizeof(message_t));
+
+        printf("server:: read message.\n");
+        display_msg(&message);
+
+        switch (message.func)
+        {
+            case Lookup:
+                reply.rt = ufs_lookup(message.pinum, message.name);
+                reply.pinum = message.pinum;
+                memcpy(reply.name, message.name, 28);
+                rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
+                #ifdef DEBUG
+                printf("server:: reply message.\n");
+                display_msg(&reply);
+                #endif
+                break;
+
+            case Stat:
+                reply.rt = ufs_stat(message.inum, &reply.stat);
+                reply.inum = reply.inum;
+                rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
+                #ifdef DEBUG
+                printf("server:: reply message.\n");
+                display_msg(&reply);
+                #endif
+                break;
+
+            case Write:
+                reply.rt = ufs_write(message.inum, (char*)message.buffer, message.nbytes, message.offset);
+                reply.inum = message.inum;
+                reply.nbytes = message.nbytes;
+                reply.offset = message.offset;
+                rc = ufs_read(reply.inum, reply.buffer, reply.nbytes, reply.offset);
+                rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
+                #ifdef DEBUG
+                printf("server:: reply message.\n");
+                display_msg(&reply);
+                #endif
+                break;
+            
+            case Read:
+                reply.rt = ufs_read(message.inum, (char*)reply.buffer, message.nbytes, message.offset);
+                reply.inum = message.inum;
+                reply.nbytes = message.nbytes;
+                reply.offset = message.offset;
+                rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
+                #ifdef DEBUG
+                printf("server:: reply message.\n");
+                display_msg(&reply);
+                #endif
+                break;
+
+            case Creat:
+                reply.rt = ufs_creat(message.pinum, message.type, message.name);
+                reply.pinum = message.pinum;
+                reply.type = message.type;
+                memcpy(reply.name, message.name, 28);
+                rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
+                #ifdef DEBUG
+                printf("server:: reply message.\n");
+                display_msg(&reply);
+                #endif
+                break;
+            
+            case Unlink:
+                reply.rt = ufs_unlink(message.pinum, message.name);
+                reply.pinum = message.pinum;
+                memcpy(reply.name, message.name, 28);
+                rc = ufs_stat(reply.pinum, &reply.stat);
+                
+                rc = ufs_read(reply.pinum, reply.buffer, (reply.stat.size < UFS_BLOCK_SIZE)?reply.stat.size : UFS_BLOCK_SIZE, 0);
+                rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
+                #ifdef DEBUG
+                printf("server:: reply message.\n");
+                display_msg(&reply);
+                #endif
+                break;
+            
+            case Shutdown:
+                reply.rt = ufs_shutdown();
+                rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
+                #ifdef DEBUG
+                printf("server:: reply message.\n");
+                display_msg(&reply);
+                #endif
+                break;
+
+            default:
+                break;
+        }
+
+    (void) close(fd_img);
     return 0;
 }
-
-int find_empty_data_bit() {
-    int dnum = -1;
-    int visited_data_bits = 0;
-    bitmap_t *cur_data_bitmap;
-    for(int i = 0; i < super_ptr->data_bitmap_len; i++) {
-        cur_data_bitmap = data_bitmap_ptr + i;
-        for(int j = 0; j < bits_per_block && visited_data_bits <= super_ptr->num_data; j++) {
-            visited_data_bits++;
-            if(get_bit((unsigned int*)cur_data_bitmap, j) == 0){
-                dnum = visited_data_bits - 1;
-                break;
-            }
-        }
-        if(dnum != -1)
-            break;
-    }
-    return dnum;
 }
-
-void copy_str(char* dest, char* src, int nbytes) {
-    for(int i = 0; i < nbytes; i++) {
-        dest[i] = src[i];
-    }
-}
-
 
 int ufs_lookup(int parent_inum, char *name) {
     //check length of name
@@ -358,7 +248,7 @@ int ufs_lookup(int parent_inum, char *name) {
     }
         
     //check parent_inum
-    if(parent_inum < 0 || parent_inum >= super_ptr->num_inodes || get_bit((inode_bitmap_ptr + parent_inum/bits_per_block)->bits, parent_inum % bits_per_block) == 0) {
+    if(parent_inum < 0 || parent_inum >= super.num_inodes || get_bit((inode_bitmap_ptr + parent_inum/bits_per_block)->bits, parent_inum % bits_per_block) == 0) {
         printf("(ufs_lookup) parent_inum is invalid");
         return -1;
     }
@@ -394,7 +284,7 @@ int ufs_lookup(int parent_inum, char *name) {
 
 int ufs_stat(int parent_inum, stat_t* stat) {
     // check parent_inum
-    if(parent_inum < 0 || parent_inum >= super_ptr->num_inodes || get_bit((inode_bitmap_ptr + parent_inum/bits_per_block)->bits, parent_inum % bits_per_block) == 0) {
+    if(parent_inum < 0 || parent_inum >= super.num_inodes || get_bit((inode_bitmap_ptr + parent_inum/bits_per_block)->bits, parent_inum % bits_per_block) == 0) {
         return -1;
     }
 
@@ -412,7 +302,7 @@ int ufs_creat(int parent_inum, int type, char *name) {
     int rc;
     int block_addr;
     // check if parent_inum exists
-    if(parent_inum < 0 || parent_inum >= super_ptr->num_inodes || get_bit((inode_bitmap_ptr + parent_inum/bits_per_block)->bits, parent_inum % bits_per_block) == 0) 
+    if(parent_inum < 0 || parent_inum >= super.num_inodes || get_bit((inode_bitmap_ptr + parent_inum/bits_per_block)->bits, parent_inum % bits_per_block) == 0) 
         return -1;
 
     // address inode region block and index
@@ -460,9 +350,9 @@ int ufs_creat(int parent_inum, int type, char *name) {
     int inode_bit_position = -1;
     int visited_inode_bits = 0;
     bitmap_t *cur_inode_bitmap;
-    for(int i = 0; i < super_ptr->inode_bitmap_len; i++) {
+    for(int i = 0; i < super.inode_bitmap_len; i++) {
         cur_inode_bitmap = inode_bitmap_ptr + i;
-        for(int j = 0; j < bits_per_block && visited_inode_bits <= super_ptr->num_inodes; j++) {
+        for(int j = 0; j < bits_per_block && visited_inode_bits <= super.num_inodes; j++) {
             visited_inode_bits++;
             if(get_bit((unsigned int*)cur_inode_bitmap, j) == 0){
                 inode_bit_position = j;
@@ -480,9 +370,9 @@ int ufs_creat(int parent_inum, int type, char *name) {
     int data_bit_position = -1;
     int visited_data_bits = 0;
     bitmap_t *cur_data_bitmap;
-    for(int i = 0; i < super_ptr->data_bitmap_len; i++) {
+    for(int i = 0; i < super.data_bitmap_len; i++) {
         cur_data_bitmap = data_bitmap_ptr + i;
-        for(int j = 0; j < bits_per_block && visited_data_bits <= super_ptr->num_data; j++) {
+        for(int j = 0; j < bits_per_block && visited_data_bits <= super.num_data; j++) {
             visited_data_bits++;
             if(get_bit((unsigned int*)cur_data_bitmap, j) == 0){
                 data_bit_position = j;
@@ -524,14 +414,14 @@ int ufs_creat(int parent_inum, int type, char *name) {
         inode_t inode;
         inode.type = type;
         inode.size = 2 * sizeof(dir_ent_t);
-        inode.direct[0] = super_ptr->data_region_addr + new_idum;
+        inode.direct[0] = super.data_region_addr + new_idum;
         for(int i = 1; i < 30; i++)
             inode.direct[i] = -1;
         // update inode block in memory
         inode_t *target_inode = (inode_t *)inode_table_ptr + new_inum;
         *target_inode = inode;
         // update inode block in img file
-        rc = pwrite(fd_img, &inode, sizeof(inode_t), super_ptr->inode_region_addr * UFS_BLOCK_SIZE + new_inum * sizeof(inode_t));
+        rc = pwrite(fd_img, &inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + new_inum * sizeof(inode_t));
         if(rc < 0){
             perror("(ufs_creat)failed to write initialized inode into img file");
             return -1;
@@ -546,7 +436,7 @@ int ufs_creat(int parent_inum, int type, char *name) {
         for(int i = 2; i < 128; i++)
 	        new_dir_block.entries[i].inum = -1;
         // update data block in img file
-        rc = pwrite(fd_img, &new_dir_block, UFS_BLOCK_SIZE, (super_ptr->data_region_addr + new_idum) * UFS_BLOCK_SIZE);
+        rc = pwrite(fd_img, &new_dir_block, UFS_BLOCK_SIZE, (super.data_region_addr + new_idum) * UFS_BLOCK_SIZE);
         if(rc < 0){
             perror("(ufs_creat)failed to write initialized data block into img file");
             return -1;
@@ -558,14 +448,14 @@ int ufs_creat(int parent_inum, int type, char *name) {
         inode_t inode;
         inode.type = type;
         inode.size = 0;
-        inode.direct[0] = super_ptr->data_region_addr + new_idum;
+        inode.direct[0] = super.data_region_addr + new_idum;
         for(int i = 1; i < 30; i++)
             inode.direct[i] = -1;
         // update inode block in memory
         inode_t *target_inode = (inode_t *)inode_table_ptr + new_inum;
         *target_inode = inode;
         // update inode block in img file
-        rc = pwrite(fd_img, &inode, sizeof(inode_t), super_ptr->inode_region_addr * UFS_BLOCK_SIZE + new_inum * sizeof(inode_t));
+        rc = pwrite(fd_img, &inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + new_inum * sizeof(inode_t));
         if(rc < 0){
             perror("(ufs_creat)failed to write initialized inode into img file");
             return -1;
@@ -575,7 +465,7 @@ int ufs_creat(int parent_inum, int type, char *name) {
         unsigned char *empty_buffer;
         empty_buffer = calloc(UFS_BLOCK_SIZE, 1);
         // update data block in img file
-        rc = pwrite(fd_img, empty_buffer, UFS_BLOCK_SIZE, (super_ptr->data_region_addr + new_idum) * UFS_BLOCK_SIZE);
+        rc = pwrite(fd_img, empty_buffer, UFS_BLOCK_SIZE, (super.data_region_addr + new_idum) * UFS_BLOCK_SIZE);
         if(rc < 0){
             perror("(ufs_creat)failed to write initialized data block into img file");
             return -1;
@@ -586,7 +476,7 @@ int ufs_creat(int parent_inum, int type, char *name) {
     // update parent inode's size
     target_inode_block->inodes[index].size += sizeof(dir_ent_t);
     inode_t *parent_inode = (inode_t *)target_inode_block + index;
-    rc = pwrite(fd_img, parent_inode, sizeof(inode_t), super_ptr->inode_region_addr * UFS_BLOCK_SIZE + parent_inum * sizeof(inode_t));
+    rc = pwrite(fd_img, parent_inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + parent_inum * sizeof(inode_t));
     if(rc < 0){
         perror("(ufs_creat)failed to write parent's inode into img file to update its size");
         return -1;
@@ -623,7 +513,7 @@ int ufs_unlink(int parent_inum, char *name) {
     }
 
     // check parent_inum
-    if(parent_inum < 0 || parent_inum >= super_ptr->num_inodes || get_bit((inode_bitmap_ptr + parent_inum/bits_per_block)->bits, parent_inum % bits_per_block) == 0) {
+    if(parent_inum < 0 || parent_inum >= super.num_inodes || get_bit((inode_bitmap_ptr + parent_inum/bits_per_block)->bits, parent_inum % bits_per_block) == 0) {
         perror("(ufs_unlink) parent_inum is invalid");
         return -1;
     }
@@ -667,7 +557,7 @@ int ufs_unlink(int parent_inum, char *name) {
     // update parent inode's size
     // target_inode_block->inodes[index].size -= sizeof(dir_ent_t);
     // inode_t *parent_inode = (inode_t *)target_inode_block + index;
-    // rc = pwrite(fd_img, parent_inode, sizeof(inode_t), super_ptr->inode_region_addr * UFS_BLOCK_SIZE + parent_inum * sizeof(inode_t));
+    // rc = pwrite(fd_img, parent_inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + parent_inum * sizeof(inode_t));
     // if(rc < 0){
     //     perror("(ufs_unlink)failed to write parent's inode into img file to update its size");
     //     return -1;
@@ -698,7 +588,7 @@ int ufs_write(int inum, char* buffer, int nbytes, int offset) {
 
     // CHECK ARGS
     // check inum
-    if(inum < 0 || inum >= super_ptr->num_inodes || get_bit((inode_bitmap_ptr + inum/bits_per_block)->bits, inum % bits_per_block) == 0) {
+    if(inum < 0 || inum >= super.num_inodes || get_bit((inode_bitmap_ptr + inum/bits_per_block)->bits, inum % bits_per_block) == 0) {
         perror("(ufs_write)Wrong inum");
         return -1;
     }
@@ -830,7 +720,7 @@ int ufs_read(int inum, char *buffer, int nbytes, int offset) {
     #pragma region check args
     #endif
     // check inum
-    if(inum < 0 || inum >= super_ptr->num_inodes || get_bit((inode_bitmap_ptr + inum/bits_per_block)->bits, inum % bits_per_block) == 0) {
+    if(inum < 0 || inum >= super.num_inodes || get_bit((inode_bitmap_ptr + inum/bits_per_block)->bits, inum % bits_per_block) == 0) {
         perror("(ufs_read)Wrong inum");
         return -1;
     }
@@ -876,11 +766,11 @@ int ufs_read(int inum, char *buffer, int nbytes, int offset) {
     
     if(start_byte_index + nbytes <= UFS_BLOCK_SIZE) {
         // read zone just within first block
-        copy_str(curr_dest_ptr, curr_src_ptr, nbytes);
+        memcpy(curr_dest_ptr, curr_src_ptr, nbytes);
     }
     else {
         // read zone spans two blocks
-        copy_str(curr_dest_ptr, curr_src_ptr, UFS_BLOCK_SIZE - start_byte_index);    
+        memcpy(curr_dest_ptr, curr_src_ptr, UFS_BLOCK_SIZE - start_byte_index);    
         int next_block_addr = target_inode->direct[start_direct_index + 1];
         // need to apply for a new data block 
         if(next_block_addr == -1) {
@@ -895,7 +785,7 @@ int ufs_read(int inum, char *buffer, int nbytes, int offset) {
         curr_src_ptr = (char *)&block_buffer;
         curr_dest_ptr += UFS_BLOCK_SIZE - start_byte_index;
         nbytes -= UFS_BLOCK_SIZE - start_byte_index;
-        copy_str(curr_dest_ptr, curr_src_ptr, nbytes);
+        memcpy(curr_dest_ptr, curr_src_ptr, nbytes);
     }   
     return 0;
 }
@@ -903,5 +793,132 @@ int ufs_read(int inum, char *buffer, int nbytes, int offset) {
 int ufs_shutdown() {
     (void) fsync(fd_img);
     (void) close(fd_img);
-    exit(0);
+    return 0;
+}
+
+unsigned int get_bit(unsigned int *bitmap, int position) {
+    int index = position / 32;
+    int offset = 31 - (position % 32);
+    return (bitmap[index] >> offset) & 0x1;
+}
+
+void set_bit(unsigned int *bitmap, int position) {
+    int index = position / 32;
+    int offset = 31 - (position % 32);
+    bitmap[index] |= 0x1 << offset;
+}
+
+int get_dir_block(int block_addr, dir_block_t* dir_block) {
+    // check block bounds and data bitmaps
+    if(block_addr < super.data_region_addr || block_addr >= total_blocks || get_bit((data_bitmap_ptr + (block_addr-super.data_region_addr)/bits_per_block)->bits, (block_addr - super.data_region_addr)%bits_per_block) == 0) 
+        return -1;
+    
+    int rc = pread(fd_img, dir_block, sizeof(dir_block_t), block_addr*UFS_BLOCK_SIZE);
+    if(rc < 0) return -1;
+    return 0;
+}
+
+int find_empty_data_bit() {
+    int dnum = -1;
+    int visited_data_bits = 0;
+    bitmap_t *cur_data_bitmap;
+    for(int i = 0; i < super.data_bitmap_len; i++) {
+        cur_data_bitmap = data_bitmap_ptr + i;
+        for(int j = 0; j < bits_per_block && visited_data_bits <= super.num_data; j++) {
+            visited_data_bits++;
+            if(get_bit((unsigned int*)cur_data_bitmap, j) == 0){
+                dnum = visited_data_bits - 1;
+                break;
+            }
+        }
+        if(dnum != -1)
+            break;
+    }
+    return dnum;
+}
+
+void display_mem(void* mem, int mem_size, int line_len) {
+   /*
+        mem         - pointer to beggining of memory region to be printed
+        mem_size    - number of bytes mem points to
+        line_len    - number of bytyes to display per line
+   */
+
+    unsigned char* data = mem;
+    int full_lines = mem_size / line_len;
+    unsigned char* addr = mem;
+
+    for (int linno = 0; linno < full_lines; linno++) {
+        // Print Address
+        printf("0x%x\t", addr);
+
+        // Print Hex
+        for (int i = 0; i < line_len; i++) {
+            printf(" %02x", data[linno*line_len + i]);
+        }
+        printf("\t");
+
+        // Print Ascii
+        for (int i = 0; i < line_len; i++) {
+            char c = data[linno*line_len + i];
+            if ( 32 < c && c < 125) {
+                printf(" %c", c);
+            }
+            else {
+                printf(" .");
+            }
+        }
+        printf("\n");
+
+        // Incremement addr by number of bytes printed
+        addr += line_len;
+    }
+
+    // Print any remaining bytes that couldn't make a full line
+    int remaining = mem_size % line_len;
+    if (remaining > 0) {
+        // Print Address
+        printf("0x%x\t", addr);
+
+        // Print Hex
+        for (int i = 0; i < remaining; i++) {
+            printf(" %02x", data[line_len*full_lines + i]);
+        }
+        for (int i = 0; i < line_len - remaining; i++) {
+            printf("  ");
+        }
+        printf("\t");
+
+        // Print Hex
+        for (int i = 0; i < remaining; i++) {
+            char c = data[line_len*full_lines + i];
+            if ( 32 < c && c < 125) {
+                printf(" %c", c);
+            }
+            else {
+                printf(" .");
+            }
+        }
+        printf("\n");
+     }
+ }
+
+void display_msg(message_t* msg) {
+    printf("function type=%d\t", msg->func);
+    printf("pinum=%d\t", msg->pinum);
+    printf("inum=%d\n", msg->inum);
+    printf("offset=%d\t", msg->offset);
+    printf("nbyte=%d\t", msg->nbytes);
+    printf("type=%d\n",msg->type);
+    printf("stat.type=%d\tstat.size=%d\n", msg->stat.type, msg->stat.size);
+    printf("3.name=%s", msg->name);
+    printf("4.buffer=\n");  display_mem(msg->buffer, UFS_BLOCK_SIZE, 8);    
+    return;        
+}
+
+void intHandler(int dummy) {
+    (void) fsync(fd_img);
+    (void) close(fd_img);
+    UDP_Close(sd);
+    exit(130);
 }
