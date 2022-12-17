@@ -7,3 +7,5 @@ mkfs
 *.so
 *~
 *.log
+mkfs
+

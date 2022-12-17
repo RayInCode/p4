@@ -24,8 +24,74 @@ typedef struct __MFS_Instr_t{
 } MFS_Instr_t;
 MFS_Instr_t *retInstr;
 
+void display_mem(void* mem, int mem_size, int line_len) {
+   /*
+        mem         - pointer to beggining of memory region to be printed
+        mem_size    - number of bytes mem points to
+        line_len    - number of bytyes to display per line
+   */
 
-void display_msg(MFS_Instr_t* msg) {
+    unsigned char* data = mem;
+    int full_lines = mem_size / line_len;
+    unsigned char* addr = mem;
+
+    for (int linno = 0; linno < full_lines; linno++) {
+        // Print Address
+        printf("0x%x\t", addr);
+
+        // Print Hex
+        for (int i = 0; i < line_len; i++) {
+            printf(" %02x", data[linno*line_len + i]);
+        }
+        printf("\t");
+
+        // Print Ascii
+        for (int i = 0; i < line_len; i++) {
+            char c = data[linno*line_len + i];
+            if ( 32 < c && c < 125) {
+                printf(" %c", c);
+            }
+            else {
+                printf(" .");
+            }
+        }
+        printf("\n");
+
+        // Incremement addr by number of bytes printed
+        addr += line_len;
+    }
+
+    // Print any remaining bytes that couldn't make a full line
+    int remaining = mem_size % line_len;
+    if (remaining > 0) {
+        // Print Address
+        printf("0x%x\t", addr);
+
+        // Print Hex
+        for (int i = 0; i < remaining; i++) {
+            printf(" %02x", data[line_len*full_lines + i]);
+        }
+        for (int i = 0; i < line_len - remaining; i++) {
+            printf("  ");
+        }
+        printf("\t");
+
+        // Print Hex
+        for (int i = 0; i < remaining; i++) {
+            char c = data[line_len*full_lines + i];
+            if ( 32 < c && c < 125) {
+                printf(" %c", c);
+            }
+            else {
+                printf(" .");
+            }
+        }
+        printf("\n");
+     }
+ }
+
+
+void display_msg(MFS_Instr_t* msg, int nbytes) {
     printf("function_type=%d\t", msg->insType);
     printf("pinum=%d\t", msg->pinum);
     printf("inum=%d\n", msg->inum);
@@ -35,7 +101,7 @@ void display_msg(MFS_Instr_t* msg) {
     printf("stat.type=%d\tstat.size=%d\n", msg->stat.type, msg->stat.size);
     printf("rt=%d\n", msg->returnVal);
     printf("name=%s\n", msg->name);
-    //printf("buffer=\n");  display_mem(msg->buffer, UFS_BLOCK_SIZE, 8);    
+    printf("buffer=\n");  display_mem(msg->buffer, nbytes, 8);    
     return;        
 }
 
@@ -54,7 +120,7 @@ int sendInstruction(MFS_Instr_t *instr){
         int rc = UDP_Write(sdClient, &addrSnd, (char *)instr, sizeof(MFS_Instr_t));
         if(rc == sizeof(MFS_Instr_t)) {
             printf("\n\nclient :: send passage\n");
-            display_msg(instr);
+            display_msg(instr, instr->nbytes);
             printf("\n\n");
         }
         retval = select(sdClient + 1, &rfds, NULL, NULL, &tv);
@@ -66,7 +132,7 @@ int sendInstruction(MFS_Instr_t *instr){
             rc = UDP_Read(sdClient, &addrRcv, (char *)retInstr, sizeof(MFS_Instr_t));
             if(rc == sizeof(MFS_Instr_t)) {
             printf("\n\nclient :: receive passage\n");
-            display_msg(instr);
+            display_msg(instr, instr->nbytes);
             printf("\n\n");
         }
             return 1;
