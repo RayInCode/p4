@@ -57,7 +57,7 @@ unsigned int get_bit(unsigned int *, int);
 void set_bit(unsigned int *, int);
 int get_dir_block(int, dir_block_t*);
 int find_empty_data_bit();
-void display_msg(message_t *);
+void display_msg(message_t *, int);
 void intHandler(int);
 
 int ufs_lookup(int parent_inum, char *name);
@@ -146,7 +146,7 @@ int main(int argc, char* argv[]) {
         assert(rc == sizeof(message_t));
 
         printf("\nserver:: read message.\n");
-        display_msg(&message);
+        display_msg(&message, message.nbytes);
 
         switch (message.func)
         {
@@ -158,7 +158,7 @@ int main(int argc, char* argv[]) {
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
                 printf("\nserver:: reply message.\n");
-                display_msg(&reply);
+                display_msg(&reply, message.nbytes);
                 #endif
                 break;
 
@@ -169,7 +169,7 @@ int main(int argc, char* argv[]) {
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
                 printf("\nserver:: reply message.\n");
-                display_msg(&reply);
+                display_msg(&reply, message.nbytes);
                 #endif
                 break;
 
@@ -183,7 +183,7 @@ int main(int argc, char* argv[]) {
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
                 printf("\nserver:: reply message.\n");
-                display_msg(&reply);
+                display_msg(&reply, message.nbytes);
                 #endif
                 break;
             
@@ -196,7 +196,7 @@ int main(int argc, char* argv[]) {
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
                 printf("\nserver:: reply message.\n");
-                display_msg(&reply);
+                display_msg(&reply, message.nbytes);
                 #endif
                 break;
 
@@ -209,7 +209,7 @@ int main(int argc, char* argv[]) {
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
                 printf("\nserver:: reply message.\n");
-                display_msg(&reply);
+                display_msg(&reply, message.nbytes);
                 #endif
                 break;
             
@@ -224,7 +224,7 @@ int main(int argc, char* argv[]) {
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
                 printf("\nserver:: reply message.\n");
-                display_msg(&reply);
+                display_msg(&reply,message.nbytes);
                 #endif
                 break;
             
@@ -234,10 +234,10 @@ int main(int argc, char* argv[]) {
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
                 printf("\nserver:: reply message.\n");
-                display_msg(&reply);
+                display_msg(&reply, message.nbytes);
                 #endif
                 exit(0);
-                
+
                 break;
             default:
                 break;
@@ -910,7 +910,7 @@ void display_mem(void* mem, int mem_size, int line_len) {
      }
  }
 
-void display_msg(message_t* msg) {
+void display_msg(message_t* msg, int nbytes) {
     printf("function_type=%d\t", msg->func);
     printf("pinum=%d\t", msg->pinum);
     printf("inum=%d\n", msg->inum);
@@ -920,7 +920,7 @@ void display_msg(message_t* msg) {
     printf("stat.type=%d\tstat.size=%d\n", msg->stat.type, msg->stat.size);
     printf("rt=%d\n", msg->rt);
     printf("name=%s\n", msg->name);
-    printf("buffer=\n");  //display_mem(msg->buffer, UFS_BLOCK_SIZE, 8);    
+    printf("buffer=\n");  display_mem(msg->buffer, nbytes, 8);    
     return;        
 }
 
