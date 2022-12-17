@@ -101,7 +101,7 @@ void display_msg(MFS_Instr_t* msg, int nbytes) {
     printf("stat.type=%d\tstat.size=%d\n", msg->stat.type, msg->stat.size);
     printf("rt=%d\n", msg->returnVal);
     printf("name=%s\n", msg->name);
-    printf("buffer=\n");  display_mem(msg->buffer, nbytes, 8);    
+    //printf("buffer=\n");  display_mem(msg->buffer, nbytes, 100);    
     return;        
 }
 

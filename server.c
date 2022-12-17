@@ -183,7 +183,7 @@ int main(int argc, char* argv[]) {
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
                 printf("\nserver:: reply message.\n");
-                display_msg(&reply, message.nbytes);
+                display_msg(&reply, 0);
                 #endif
                 break;
             
@@ -651,7 +651,7 @@ int ufs_write(int inum, char* buffer, int nbytes, int offset) {
     
     if(start_byte_index + nbytes <= UFS_BLOCK_SIZE) {
         // write zone just within first block
-        strncpy(curr_dest_ptr, curr_src_ptr, nbytes);
+        memcpy(curr_dest_ptr, curr_src_ptr, nbytes);
         // update the modified data block into img file
         rc = pwrite(fd_img, &block_buffer, UFS_BLOCK_SIZE, start_block_addr * UFS_BLOCK_SIZE);
         if(rc != UFS_BLOCK_SIZE) {
@@ -661,7 +661,7 @@ int ufs_write(int inum, char* buffer, int nbytes, int offset) {
     }
     else {
         // write zone spans two blocks
-        strncpy(curr_dest_ptr, curr_src_ptr, UFS_BLOCK_SIZE - start_byte_index);
+        memcpy(curr_dest_ptr, curr_src_ptr, UFS_BLOCK_SIZE - start_byte_index);
         // update the modified data block into img file
         rc = pwrite(fd_img, &block_buffer, UFS_BLOCK_SIZE, start_block_addr * UFS_BLOCK_SIZE);
         if(rc != UFS_BLOCK_SIZE) {
@@ -695,7 +695,7 @@ int ufs_write(int inum, char* buffer, int nbytes, int offset) {
         curr_dest_ptr = (char *)&block_buffer;
         curr_src_ptr += UFS_BLOCK_SIZE - start_byte_index;
         nbytes -= UFS_BLOCK_SIZE - start_byte_index;
-        strncpy(curr_dest_ptr, curr_src_ptr, nbytes);
+        memcpy(curr_dest_ptr, curr_src_ptr, nbytes);
         // update the modified data block into img file
         rc = pwrite(fd_img, &block_buffer, UFS_BLOCK_SIZE, next_block_addr * UFS_BLOCK_SIZE);
         if(rc != UFS_BLOCK_SIZE) {
@@ -920,7 +920,7 @@ void display_msg(message_t* msg, int nbytes) {
     printf("stat.type=%d\tstat.size=%d\n", msg->stat.type, msg->stat.size);
     printf("rt=%d\n", msg->rt);
     printf("name=%s\n", msg->name);
-    printf("buffer=\n");  display_mem(msg->buffer, nbytes, 8);    
+    printf("buffer=\n");  display_mem(msg->buffer, nbytes, 100);    
     return;        
 }
 

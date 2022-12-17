@@ -1,0 +1,7 @@
+make: Nothing to be done for 'all'.
+total blocks        36
+  inodes            32 [size of each: 128]
+  data blocks       32
+layout details
+  inode bitmap address/len 1 [1]
+  data bitmap address/len  2 [1]
