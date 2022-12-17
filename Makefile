@@ -28,5 +28,8 @@ mkfs: mkfs.c ufs.h
 client: client.c libmfs.so
 	$(CC) -L$(current_dir) $(CFLAGS) client.c -g -o client -lmfs
 
+debug: client server mkfs
+	rm debug.img; ./mkfs -f debug.img;
+
 clean:
 	-rm -f $(OBJS) server client mkfs libmfs.so *.img *.o *~
