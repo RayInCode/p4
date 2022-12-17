@@ -236,6 +236,7 @@ int main(int argc, char* argv[]) {
                 printf("\nserver:: reply message.\n");
                 display_msg(&reply, message.nbytes);
                 #endif
+                (void) close(sd);
                 exit(0);
 
                 break;
@@ -330,8 +331,28 @@ int ufs_creat(int parent_inum, int type, char *name) {
     int index_direct = -1;
     for(int i = 0; i < 30; i++){
         block_addr = target_inode_block->inodes[index].direct[i];
-        if(block_addr == -1)
-            continue;
+        if(block_addr == -1 && index_dir_ent == -1 && index_direct == -1){
+            int dnum = find_empty_data_bit();
+            if(dnum == -1) {
+                perror("(ufs_write) There is no empty data bit");
+                return -1;
+            }
+            // update data bitmap in memory
+            set_bit((unsigned int*)(data_bitmap_ptr + dnum/bits_per_block), dnum % bits_per_block);
+            rc = pwrite(fd_img, data_bitmap_ptr + dnum/bits_per_block, UFS_BLOCK_SIZE, (super.data_bitmap_addr + dnum/bits_per_block) * UFS_BLOCK_SIZE);
+            if(rc != UFS_BLOCK_SIZE) {
+                perror("(ufs_write) failed to update data bitmap block into file");
+                return -1;
+            }    
+            // update inode direct in memory
+            target_inode_block->inodes[index].direct[i] = super.data_region_addr + dnum;
+            index_direct = i;
+            index_dir_ent = 0;
+            break;
+        }
+        else if(block_addr == -1 && (index_dir_ent != -1 || index_direct != -1)){
+            break;
+        }
         rc = get_dir_block(block_addr, &dir_block);
         if(rc != 0)
             continue;
@@ -816,6 +837,7 @@ void set_bit(unsigned int *bitmap, int position) {
     bitmap[index] |= 0x1 << offset;
 }
 
+
 int get_dir_block(int block_addr, dir_block_t* dir_block) {
     // check block bounds and data bitmaps
     if(block_addr < super.data_region_addr || block_addr >= total_blocks || get_bit((data_bitmap_ptr + (block_addr-super.data_region_addr)/bits_per_block)->bits, (block_addr - super.data_region_addr)%bits_per_block) == 0) 
@@ -933,14 +955,14 @@ int isEmptyDir(int inum) {
 
     // check if all entries'inum in this directory is -1
     inode_t unlink_inode = inode_table_ptr->inodes[inum];
-    dir_block_t *curr_dir_block_ptr;
+    dir_block_t curr_dir_block;
     for(int i = 0; i < 30; i++) {
         if(unlink_inode.direct[i] != -1) {
-            curr_dir_block_ptr = (dir_block_t *)super_ptr + unlink_inode.direct[i];
+            rt = get_dir_block(unlink_inode.direct[i], &curr_dir_block);
             for(int j = 0; j < 128; j++) {
-                if(curr_dir_block_ptr->entries[j].inum != -1 && 
-                    !strcmp(curr_dir_block_ptr->entries[j].name, ".") &&
-                    !strcmp(curr_dir_block_ptr->entries[j].name, "..") ) 
+                if(curr_dir_block.entries[j].inum != -1 && 
+                    strcmp(curr_dir_block.entries[j].name, ".") != 0 &&
+                    strcmp(curr_dir_block.entries[j].name, "..") != 0) 
                     return -1;
             }
         }
