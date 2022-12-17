@@ -170,7 +170,7 @@ int MFS_Lookup(int pinum, char *name){
 
     int rc = sendInstruction(instr);
     if (rc == 1){
-        return retInstr->inum;
+        return retInstr->returnVal;
     }
     return -1;
 }
@@ -184,6 +184,7 @@ int MFS_Stat(int inum, MFS_Stat_t *stat){
     if (rc == 1){
         if(retInstr->returnVal == 0){
             memcpy(stat, &(retInstr->stat), sizeof(MFS_Stat_t));
+            printf("real stat.size = %d\n", stat->size);
             return 0;
         }
     }
@@ -241,6 +242,7 @@ int MFS_Creat(int pinum, int type, char *name){
 
 int MFS_Unlink(int pinum, char *name){
     MFS_Instr_t *instr = (MFS_Instr_t *)calloc(sizeof(MFS_Instr_t), 1);
+    instr->inum = 0;
     instr->insType = UNLINK;
     instr->pinum = pinum;
     memcpy(instr->name, name, 4096);

@@ -59,6 +59,7 @@ int get_dir_block(int, dir_block_t*);
 int find_empty_data_bit();
 void display_msg(message_t *, int);
 void intHandler(int);
+int isEmptyDir(int);
 
 int ufs_lookup(int parent_inum, char *name);
 int ufs_stat(int inum, stat_t *stat);
@@ -219,7 +220,6 @@ int main(int argc, char* argv[]) {
                 reply.pinum = message.pinum;
                 memcpy(reply.name, message.name, 28);
                 rc = ufs_stat(reply.pinum, &reply.stat);
-                
                 rc = ufs_read(reply.pinum, reply.buffer, (reply.stat.size < UFS_BLOCK_SIZE)?reply.stat.size : UFS_BLOCK_SIZE, 0);
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
@@ -534,6 +534,7 @@ int ufs_unlink(int parent_inum, char *name) {
         perror("(ufs_unlink) parent is not a directory");
         return -1; 
     }
+
     
     // check if there is a file with the given name under the directory
     int index_direct  = -1, index_dir_ent = -1;
@@ -561,14 +562,10 @@ int ufs_unlink(int parent_inum, char *name) {
     if(index_dir_ent == -1 || index_direct == -1)
         return 0;
 
-    // update parent inode's size
-    // target_inode_block->inodes[index].size -= sizeof(dir_ent_t);
-    // inode_t *parent_inode = (inode_t *)target_inode_block + index;
-    // rc = pwrite(fd_img, parent_inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + parent_inum * sizeof(inode_t));
-    // if(rc < 0){
-    //     perror("(ufs_unlink)failed to write parent's inode into img file to update its size");
-    //     return -1;
-    // }
+    // check if unlink target is a empty direct
+    int unlink_inum = dir_block.entries[index_dir_ent].inum;
+    if(isEmptyDir(unlink_inum) == -1)
+        return -1;
 
     // update parent inode's direntry entry
     block_addr = target_inode_block->inodes[index].direct[index_direct];
@@ -607,6 +604,10 @@ int ufs_write(int inum, char* buffer, int nbytes, int offset) {
     // check bytes
     if(nbytes < 0 || nbytes > UFS_BLOCK_SIZE) {
         perror("(ufs_write) Wrong nbytes");
+        return -1;
+    }
+    // check size after writing
+    if(offset + nbytes > 30 * UFS_BLOCK_SIZE) {
         return -1;
     }
     // if inum type is directory, offset and nbytes should align with size of dir_ent_t
@@ -922,6 +923,30 @@ void display_msg(message_t* msg, int nbytes) {
     printf("name=%s\n", msg->name);
     printf("buffer=\n");  display_mem(msg->buffer, nbytes, 100);    
     return;        
+}
+
+int isEmptyDir(int inum) {
+    // check if target file is a directory
+    stat_t stat;
+    int rt = ufs_stat(inum, &stat);
+    if(stat.type != UFS_DIRECTORY) return 0;
+
+    // check if all entries'inum in this directory is -1
+    inode_t unlink_inode = inode_table_ptr->inodes[inum];
+    dir_block_t *curr_dir_block_ptr;
+    for(int i = 0; i < 30; i++) {
+        if(unlink_inode.direct[i] != -1) {
+            curr_dir_block_ptr = (dir_block_t *)super_ptr + unlink_inode.direct[i];
+            for(int j = 0; j < 128; j++) {
+                if(curr_dir_block_ptr->entries[j].inum != -1 && 
+                    !strcmp(curr_dir_block_ptr->entries[j].name, ".") &&
+                    !strcmp(curr_dir_block_ptr->entries[j].name, "..") ) 
+                    return -1;
+            }
+        }
+    }
+
+    return 0;
 }
 
 void intHandler(int dummy) {
