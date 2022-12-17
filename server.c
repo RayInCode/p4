@@ -56,7 +56,10 @@ typedef struct {
 unsigned int get_bit(unsigned int *, int);
 void set_bit(unsigned int *, int);
 int get_dir_block(int, dir_block_t*);
+int find_empty_inode_bit();
 int find_empty_data_bit();
+int set_inode_bit(int);
+int set_data_bit(int);
 void display_msg(message_t *, int);
 void intHandler(int);
 int isEmptyDir(int);
@@ -262,11 +265,11 @@ int ufs_lookup(int parent_inum, char *name) {
     }
 
     // address inode region block and index
-    inode_block* target_inode_block = inode_table_ptr + (parent_inum/inodes_per_blocks);
+    inode_block* parent_inode_block = inode_table_ptr + (parent_inum/inodes_per_blocks);
     int index = parent_inum % inodes_per_blocks;
 
     // check if type of parent inode is directory
-    if(target_inode_block->inodes[index].type != UFS_DIRECTORY) {
+    if(parent_inode_block->inodes[index].type != UFS_DIRECTORY) {
         printf("(ufs_lookup) parent is not a directory");
         return -1; 
     }
@@ -276,7 +279,7 @@ int ufs_lookup(int parent_inum, char *name) {
     int block_addr;
     dir_block_t dir_block;
     for(int i = 0; i < 30; i++){
-        block_addr = target_inode_block->inodes[index].direct[i];
+        block_addr = parent_inode_block->inodes[index].direct[i];
         if(block_addr == -1)
             continue;
         rc = get_dir_block(block_addr, &dir_block);
@@ -308,52 +311,51 @@ int ufs_stat(int parent_inum, stat_t* stat) {
 
 int ufs_creat(int parent_inum, int type, char *name) {
     int rc;
-    int block_addr;
     // check if parent_inum exists
     if(parent_inum < 0 || parent_inum >= super.num_inodes || get_bit((inode_bitmap_ptr + parent_inum/bits_per_block)->bits, parent_inum % bits_per_block) == 0) 
         return -1;
 
-    // address inode region block and index
-    inode_block* target_inode_block = inode_table_ptr + (parent_inum/inodes_per_blocks);
-    int index = parent_inum % inodes_per_blocks;
+    // address partent_inode
+    inode_t parent_inode = inode_table_ptr->inodes[parent_inum];
 
     //check if parent inode is directory
-    if(target_inode_block->inodes[index].type != UFS_DIRECTORY)
+    if(parent_inode.type != UFS_DIRECTORY)
         return -1; 
 
     //check length of name
     if(strlen(name)>28-1) 
         return -1;
 
-    //check if the file with given name exists (whatever type) and if parent inode have room for new direct entry
+    // find a empty entry for new file and check if the name was exist (if so return 0)
     dir_block_t dir_block;
+    int dir_block_addr;
     int index_dir_ent = -1;
     int index_direct = -1;
     for(int i = 0; i < 30; i++){
-        block_addr = target_inode_block->inodes[index].direct[i];
-        if(block_addr == -1 && index_dir_ent == -1 && index_direct == -1){
+        dir_block_addr = parent_inode.direct[i];
+        if(dir_block_addr == -1){
+            // if all assigened direct blocks of parent ara full
+            if (index_dir_ent == -1 && index_direct == -1){
             int dnum = find_empty_data_bit();
             if(dnum == -1) {
-                perror("(ufs_write) There is no empty data bit");
+                printf("(ufs_create) There is no empty data bit for new dir_block");
                 return -1;
             }
+
             // update data bitmap in memory
-            set_bit((unsigned int*)(data_bitmap_ptr + dnum/bits_per_block), dnum % bits_per_block);
-            rc = pwrite(fd_img, data_bitmap_ptr + dnum/bits_per_block, UFS_BLOCK_SIZE, (super.data_bitmap_addr + dnum/bits_per_block) * UFS_BLOCK_SIZE);
-            if(rc != UFS_BLOCK_SIZE) {
-                perror("(ufs_write) failed to update data bitmap block into file");
+            rc = set_data_bit(dnum);
+            if(rc < 0)
                 return -1;
-            }    
-            // update inode direct in memory
-            target_inode_block->inodes[index].direct[i] = super.data_region_addr + dnum;
+  
+            // update parent inode direct[] in memory
+            parent_inode.direct[i] = super.data_region_addr + dnum;
             index_direct = i;
             index_dir_ent = 0;
+            }
             break;
         }
-        else if(block_addr == -1 && (index_dir_ent != -1 || index_direct != -1)){
-            break;
-        }
-        rc = get_dir_block(block_addr, &dir_block);
+
+        rc = get_dir_block(dir_block_addr, &dir_block);
         if(rc != 0)
             continue;
         for(int j = 0; j < 128; j++){
@@ -369,102 +371,47 @@ int ufs_creat(int parent_inum, int type, char *name) {
     // name doesn't exist
     // there is no empty direct entry in parent directory for new file 
     if(index_dir_ent == -1 || index_direct == -1) {
-        printf("index_dir_ent == -1 || index_direct == -1 (this part should be modified");
+        printf("(ufs_create)index_dir_ent == -1 || index_direct == -1 (all direct is full)");
         return -1;
     }
-        
-
-    // check if there is empty inode bit for new inode
-    int inode_bit_position = -1;
-    int visited_inode_bits = 0;
-    bitmap_t *cur_inode_bitmap;
-    for(int i = 0; i < super.inode_bitmap_len; i++) {
-        cur_inode_bitmap = inode_bitmap_ptr + i;
-        for(int j = 0; j < bits_per_block && visited_inode_bits <= super.num_inodes; j++) {
-            visited_inode_bits++;
-            if(get_bit((unsigned int*)cur_inode_bitmap, j) == 0){
-                inode_bit_position = j;
-                break;
-            }
-        }
-        if(inode_bit_position != -1)
-            break;
-    }
-    // can not find a empty inode bit for new inode
-    if(inode_bit_position == -1) 
-        return -1;
-
+    
+    // check if there is a empty inode bit for new file
+    int created_inum = find_empty_inode_bit();
+    if(created_inum < 0) return -1;
     // check if there is a empty data bit for new file
-    int data_bit_position = -1;
-    int visited_data_bits = 0;
-    bitmap_t *cur_data_bitmap;
-    for(int i = 0; i < super.data_bitmap_len; i++) {
-        cur_data_bitmap = data_bitmap_ptr + i;
-        for(int j = 0; j < bits_per_block && visited_data_bits <= super.num_data; j++) {
-            visited_data_bits++;
-            if(get_bit((unsigned int*)cur_data_bitmap, j) == 0){
-                data_bit_position = j;
-                break;
-            }
-        }
-        if(data_bit_position != -1)
-            break;
-    }
-    // can not find a empty data bit for new file 
-    if(data_bit_position == -1)
-        return -1;
+    int created_dnum = find_empty_data_bit();
+    if(created_dnum < 0) return -1;
 
+    // update inode bitmap in memory
+    rc = set_inode_bit(created_inum);
+    if(rc == -1) return -1;
+    // update data bitmap in memory
+    rc = set_data_bit(created_dnum);
+    if(rc == -1) return -1;
 
-    // update inode bitmap
-    // update mmap
-    set_bit((unsigned int*)cur_inode_bitmap, inode_bit_position);
-    // update img file
-    rc = pwrite(fd_img, cur_inode_bitmap, UFS_BLOCK_SIZE, (cur_inode_bitmap - (bitmap_t *)super_ptr) * UFS_BLOCK_SIZE);
-    if(rc < 0){
-        perror("(ufs_creat)failed to update inode bitmap into img file");
-        return -1;
-    }
-
-    // update data bitmap
-    // update mmap
-    set_bit((unsigned int*)cur_data_bitmap, data_bit_position);
-    // update file img
-    rc = pwrite(fd_img, cur_data_bitmap, UFS_BLOCK_SIZE, (cur_data_bitmap - (bitmap_t *)super_ptr) * UFS_BLOCK_SIZE);
-    if(rc < 0){
-        perror("(ufs_creat)failed to update data bitmap into img file");
-        return -1;
-    }
-
-    int new_inum = visited_inode_bits - 1;
-    int new_idum = visited_data_bits - 1;
     if(type == UFS_DIRECTORY) {
         // initialize new inode 
         inode_t inode;
         inode.type = type;
         inode.size = 2 * sizeof(dir_ent_t);
-        inode.direct[0] = super.data_region_addr + new_idum;
+        inode.direct[0] = super.data_region_addr + created_dnum;
         for(int i = 1; i < 30; i++)
             inode.direct[i] = -1;
         // update inode block in memory
-        inode_t *target_inode = (inode_t *)inode_table_ptr + new_inum;
+        inode_t *target_inode = (inode_t *)inode_table_ptr + created_inum;
         *target_inode = inode;
-        // update inode block in img file
-        rc = pwrite(fd_img, &inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + new_inum * sizeof(inode_t));
-        if(rc < 0){
-            perror("(ufs_creat)failed to write initialized inode into img file");
-            return -1;
-        }
+
         
         // initialize new data block
         dir_block_t new_dir_block;
         strcpy(new_dir_block.entries[0].name, ".");
-        new_dir_block.entries[0].inum = new_inum;
+        new_dir_block.entries[0].inum = created_inum;
         strcpy(new_dir_block.entries[1].name, "..");
         new_dir_block.entries[1].inum = parent_inum;
         for(int i = 2; i < 128; i++)
 	        new_dir_block.entries[i].inum = -1;
         // update data block in img file
-        rc = pwrite(fd_img, &new_dir_block, UFS_BLOCK_SIZE, (super.data_region_addr + new_idum) * UFS_BLOCK_SIZE);
+        rc = pwrite(fd_img, &new_dir_block, UFS_BLOCK_SIZE, (super.data_region_addr + created_dnum) * UFS_BLOCK_SIZE);
         if(rc < 0){
             perror("(ufs_creat)failed to write initialized data block into img file");
             return -1;
@@ -476,14 +423,14 @@ int ufs_creat(int parent_inum, int type, char *name) {
         inode_t inode;
         inode.type = type;
         inode.size = 0;
-        inode.direct[0] = super.data_region_addr + new_idum;
+        inode.direct[0] = super.data_region_addr + created_dnum;
         for(int i = 1; i < 30; i++)
             inode.direct[i] = -1;
         // update inode block in memory
-        inode_t *target_inode = (inode_t *)inode_table_ptr + new_inum;
+        inode_t *target_inode = (inode_t *)inode_table_ptr + created_inum;
         *target_inode = inode;
         // update inode block in img file
-        rc = pwrite(fd_img, &inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + new_inum * sizeof(inode_t));
+        rc = pwrite(fd_img, &inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + created_inum * sizeof(inode_t));
         if(rc < 0){
             perror("(ufs_creat)failed to write initialized inode into img file");
             return -1;
@@ -493,37 +440,43 @@ int ufs_creat(int parent_inum, int type, char *name) {
         unsigned char *empty_buffer;
         empty_buffer = calloc(UFS_BLOCK_SIZE, 1);
         // update data block in img file
-        rc = pwrite(fd_img, empty_buffer, UFS_BLOCK_SIZE, (super.data_region_addr + new_idum) * UFS_BLOCK_SIZE);
+        rc = pwrite(fd_img, empty_buffer, UFS_BLOCK_SIZE, (super.data_region_addr + created_dnum) * UFS_BLOCK_SIZE);
         if(rc < 0){
             perror("(ufs_creat)failed to write initialized data block into img file");
             return -1;
         }
     }
 
-   
     // update parent inode's size
-    target_inode_block->inodes[index].size += sizeof(dir_ent_t);
-    inode_t *parent_inode = (inode_t *)target_inode_block + index;
-    rc = pwrite(fd_img, parent_inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + parent_inum * sizeof(inode_t));
+    if(index_dir_ent*UFS_BLOCK_SIZE + index_dir_ent*sizeof(dir_ent_t) == parent_inode.size)
+        parent_inode.size += sizeof(dir_ent_t);
+    rc = pwrite(fd_img, &parent_inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + parent_inum * sizeof(inode_t));
     if(rc < 0){
         perror("(ufs_creat)failed to write parent's inode into img file to update its size");
         return -1;
     }
     // update parent inode's direntry entry
-    block_addr = target_inode_block->inodes[index].direct[index_direct];
-    rc = get_dir_block(block_addr, &dir_block);
+    dir_block_addr = parent_inode.direct[index_direct];
+    rc = get_dir_block(dir_block_addr, &dir_block);
     if(rc < 0){
         perror("(ufs_creat)failed to get_dir_block for updating parents' directory block");
         return -1;
     }
-    dir_block.entries[index_dir_ent].inum = new_inum;
+    dir_block.entries[index_dir_ent].inum = created_inum;
     strcpy(dir_block.entries[index_dir_ent].name, name);
-    rc = pwrite(fd_img, &dir_block, UFS_BLOCK_SIZE, block_addr * UFS_BLOCK_SIZE);
+    rc = pwrite(fd_img, &dir_block, UFS_BLOCK_SIZE, dir_block_addr * UFS_BLOCK_SIZE);
     if(rc < 0){
         perror("(ufs_creat)failed to write parent's directory block into img file");
         return -1;
     }
 
+
+    // update meta blocks into img file
+    rc = pwrite(fd_img, super_ptr, UFS_BLOCK_SIZE * super.data_region_addr, 0);
+    if(rc < 0){
+        perror("(ufs_creat)failed to write meta blocks into img file");
+        return -1;
+    }
     (void) fsync(fd_img);
     return 0;
 }
@@ -534,6 +487,7 @@ int ufs_unlink(int parent_inum, char *name) {
         perror("can not unlink . or ..");
         return -1;
     }
+
     // check length of name
     if(strlen(name)>28-1) {
         printf("(ufs_unlink) length of name is larger than 28!");
@@ -546,27 +500,27 @@ int ufs_unlink(int parent_inum, char *name) {
         return -1;
     }
 
-    // address inode region block and index
-    inode_block* target_inode_block = inode_table_ptr + (parent_inum/inodes_per_blocks);
+    // address parent inode region block and index
+    inode_block* parent_inode_block = inode_table_ptr + (parent_inum/inodes_per_blocks);
     int index = parent_inum % inodes_per_blocks;
 
     // check if type of parent inode is directory
-    if(target_inode_block->inodes[index].type != UFS_DIRECTORY) {
+    if(parent_inode_block->inodes[index].type != UFS_DIRECTORY) {
         perror("(ufs_unlink) parent is not a directory");
         return -1; 
     }
 
     
-    // check if there is a file with the given name under the directory
+    // check if there is a file with the given name under the  parent directory
     int index_direct  = -1, index_dir_ent = -1;
     int rc;
-    int block_addr;
+    int dir_block_addr;
     dir_block_t dir_block;
     for(int i = 0; i < 30; i++){
-        block_addr = target_inode_block->inodes[index].direct[i];
-        if(block_addr == -1)
+        dir_block_addr = parent_inode_block->inodes[index].direct[i];
+        if(dir_block_addr == -1)
             continue;
-        rc = get_dir_block(block_addr, &dir_block);
+        rc = get_dir_block(dir_block_addr, &dir_block);
         if(rc != 0)
             continue;
         for(int j = 0; j < 128; j++){
@@ -589,14 +543,14 @@ int ufs_unlink(int parent_inum, char *name) {
         return -1;
 
     // update parent inode's direntry entry
-    block_addr = target_inode_block->inodes[index].direct[index_direct];
-    rc = get_dir_block(block_addr, &dir_block);
+    dir_block_addr = parent_inode_block->inodes[index].direct[index_direct];
+    rc = get_dir_block(dir_block_addr, &dir_block);
     if(rc < 0){
         perror("(ufs_unlink)failed to get_dir_block for updating parents' directory block");
         return -1;
     }
     dir_block.entries[index_dir_ent].inum = -1;
-    rc = pwrite(fd_img, &dir_block, UFS_BLOCK_SIZE, block_addr * UFS_BLOCK_SIZE);
+    rc = pwrite(fd_img, &dir_block, UFS_BLOCK_SIZE, dir_block_addr * UFS_BLOCK_SIZE);
     if(rc < 0){
         perror("(ufs_unlink)failed to write parent's directory block into img file");
         return -1;
@@ -866,6 +820,53 @@ int find_empty_data_bit() {
     }
     return dnum;
 }
+
+
+int find_empty_inode_bit() {
+    int inum = -1;
+    int visited_inode_bits = 0;
+    bitmap_t *cur_inode_bitmap;
+    for(int i = 0; i < super.inode_bitmap_len; i++) {
+        cur_inode_bitmap = inode_bitmap_ptr + i;
+        for(int j = 0; j < bits_per_block; j++) {
+        // for(int j = 0; j < bits_per_block && visited_inode_bits <= super.num_inodes; j++) {
+            visited_inode_bits++;
+            if(get_bit((unsigned int*)cur_inode_bitmap, j) == 0){
+                inum = visited_inode_bits - 1;
+                break;
+            }
+        }
+        if(inum != -1)
+            break;
+    }
+    return inum;
+}
+
+int set_inode_bit(int inum) {
+    // check inum
+    // if(inum < 0 || inum >= super.num_inodes)
+    if(inum < 0)
+        return -1;
+    
+    bitmap_t *target_inode_bitmap = inode_bitmap_ptr + (inum / bits_per_block);
+    int positon = inum % bits_per_block;
+
+    set_bit((unsigned int *)target_inode_bitmap, positon);
+    return 0;
+}
+
+int set_data_bit(int dnum) {
+    // check dnum
+    if(dnum < 0 || dnum >= super.num_data)
+        return -1;
+    
+    bitmap_t *target_data_bitmap = data_bitmap_ptr + (dnum / bits_per_block);
+    int positon = dnum % bits_per_block;
+
+    set_bit((unsigned int *)target_data_bitmap, positon);
+    return 0;
+}
+
 
 void display_mem(void* mem, int mem_size, int line_len) {
    /*
