@@ -24,6 +24,21 @@ typedef struct __MFS_Instr_t{
 } MFS_Instr_t;
 MFS_Instr_t *retInstr;
 
+
+void display_msg(MFS_Instr_t* msg) {
+    printf("function_type=%d\t", msg->insType);
+    printf("pinum=%d\t", msg->pinum);
+    printf("inum=%d\n", msg->inum);
+    printf("offset=%d\t", msg->offset);
+    printf("nbyte=%d\t", msg->nbytes);
+    printf("type=%d\n",msg->type);
+    printf("stat.type=%d\tstat.size=%d\n", msg->stat.type, msg->stat.size);
+    printf("rt=%d\n", msg->returnVal);
+    printf("name=%s\n", msg->name);
+    //printf("buffer=\n");  display_mem(msg->buffer, UFS_BLOCK_SIZE, 8);    
+    return;        
+}
+
 //method to send instruction to the server
 int sendInstruction(MFS_Instr_t *instr){
     retInstr = (MFS_Instr_t *)calloc(sizeof(MFS_Instr_t), 1);
@@ -37,6 +52,11 @@ int sendInstruction(MFS_Instr_t *instr){
         tv.tv_usec = 0;
 
         int rc = UDP_Write(sdClient, &addrSnd, (char *)instr, sizeof(MFS_Instr_t));
+        if(rc == sizeof(MFS_Instr_t)) {
+            printf("\n\nclient :: send passage\n");
+            display_msg(instr);
+            printf("\n\n");
+        }
         retval = select(sdClient + 1, &rfds, NULL, NULL, &tv);
         if (retval == -1){
             perror("select()");
@@ -44,6 +64,11 @@ int sendInstruction(MFS_Instr_t *instr){
         }
         if (retval == 1){
             rc = UDP_Read(sdClient, &addrRcv, (char *)retInstr, sizeof(MFS_Instr_t));
+            if(rc == sizeof(MFS_Instr_t)) {
+            printf("\n\nclient :: receive passage\n");
+            display_msg(instr);
+            printf("\n\n");
+        }
             return 1;
         }
     }while(retval == 0);

@@ -1,0 +1,8 @@
+*.ignore
+*.o
+*.img
+client
+server
+*.so
+*~
+*.log

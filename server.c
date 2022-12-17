@@ -98,7 +98,7 @@ int main(int argc, char* argv[]) {
     #endif
 
     // load file system image file
-    fd_img = open(fname_img, O_RDWR, S_IRUSR | S_IWUSR);
+    fd_img = open(fname_img, O_RDWR);
     if(fd_img < 0){
         perror("failed to open file system image!");
         exit(1);
