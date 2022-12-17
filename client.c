@@ -42,8 +42,11 @@ int main(int argc, char *argv[]) {
     int server_port = atoi(argv[1]);
 
     int rt = MFS_Init("localhost", server_port);
+    if(rt == -1) {
+        exit(-1);
+    }
 
-    char *prompt = "client> ";
+    char *prompt = "\n\nclient> ";
     char *msg = (char*) calloc(BUFFER_SIZE, 1);
     char *rest;
     char *func_name;
@@ -56,8 +59,6 @@ int main(int argc, char *argv[]) {
         }
         rest = strdup(msg);
         func_name = trim(strtok_r(rest, ":", &rest));
-        int npara = 0;
-        while(strchr(msg, '&') != NULL) npara++;
         if(!strcmp(func_name, "lookup")){
             int pinum = atoi(trim(strtok_r(rest, "&", &rest)));
             char *name = strtok_r(rest, "&", &rest);
@@ -94,7 +95,6 @@ int main(int argc, char *argv[]) {
             char *buffer = (char *)calloc(size + 1, 1);
             rt = MFS_Read(inum, buffer, offset, size);
             printf("client:: got reply\nrt = %d\n", rt);
-            
         }
         
         else if(!strcmp(func_name, "creat")){

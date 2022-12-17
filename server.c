@@ -145,71 +145,77 @@ int main(int argc, char* argv[]) {
         rc = UDP_Read(sd, &addr, (char*)&message, sizeof(message_t));
         assert(rc == sizeof(message_t));
 
-        printf("server:: read message.\n");
+        printf("\nserver:: read message.\n");
         display_msg(&message);
 
         switch (message.func)
         {
             case Lookup:
                 reply.rt = ufs_lookup(message.pinum, message.name);
+                reply.func = message.func;
                 reply.pinum = message.pinum;
                 memcpy(reply.name, message.name, 28);
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
-                printf("server:: reply message.\n");
+                printf("\nserver:: reply message.\n");
                 display_msg(&reply);
                 #endif
                 break;
 
             case Stat:
                 reply.rt = ufs_stat(message.inum, &reply.stat);
+                reply.func = message.func;
                 reply.inum = reply.inum;
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
-                printf("server:: reply message.\n");
+                printf("\nserver:: reply message.\n");
                 display_msg(&reply);
                 #endif
                 break;
 
             case Write:
                 reply.rt = ufs_write(message.inum, (char*)message.buffer, message.nbytes, message.offset);
+                reply.func = message.func;
                 reply.inum = message.inum;
                 reply.nbytes = message.nbytes;
                 reply.offset = message.offset;
                 rc = ufs_read(reply.inum, reply.buffer, reply.nbytes, reply.offset);
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
-                printf("server:: reply message.\n");
+                printf("\nserver:: reply message.\n");
                 display_msg(&reply);
                 #endif
                 break;
             
             case Read:
                 reply.rt = ufs_read(message.inum, (char*)reply.buffer, message.nbytes, message.offset);
+                reply.func = message.func;
                 reply.inum = message.inum;
                 reply.nbytes = message.nbytes;
                 reply.offset = message.offset;
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
-                printf("server:: reply message.\n");
+                printf("\nserver:: reply message.\n");
                 display_msg(&reply);
                 #endif
                 break;
 
             case Creat:
                 reply.rt = ufs_creat(message.pinum, message.type, message.name);
+                reply.func = message.func;
                 reply.pinum = message.pinum;
                 reply.type = message.type;
                 memcpy(reply.name, message.name, 28);
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
-                printf("server:: reply message.\n");
+                printf("\nserver:: reply message.\n");
                 display_msg(&reply);
                 #endif
                 break;
             
             case Unlink:
                 reply.rt = ufs_unlink(message.pinum, message.name);
+                reply.func = message.func;
                 reply.pinum = message.pinum;
                 memcpy(reply.name, message.name, 28);
                 rc = ufs_stat(reply.pinum, &reply.stat);
@@ -217,16 +223,17 @@ int main(int argc, char* argv[]) {
                 rc = ufs_read(reply.pinum, reply.buffer, (reply.stat.size < UFS_BLOCK_SIZE)?reply.stat.size : UFS_BLOCK_SIZE, 0);
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
-                printf("server:: reply message.\n");
+                printf("\nserver:: reply message.\n");
                 display_msg(&reply);
                 #endif
                 break;
             
             case Shutdown:
                 reply.rt = ufs_shutdown();
+                reply.func = message.func;
                 rc = UDP_Write(sd, &addr, (char*)&reply, sizeof(message_t));
                 #ifdef DEBUG
-                printf("server:: reply message.\n");
+                printf("\nserver:: reply message.\n");
                 display_msg(&reply);
                 #endif
                 break;
@@ -234,10 +241,9 @@ int main(int argc, char* argv[]) {
             default:
                 break;
         }
-
+    }
     (void) close(fd_img);
     return 0;
-}
 }
 
 int ufs_lookup(int parent_inum, char *name) {
@@ -904,15 +910,16 @@ void display_mem(void* mem, int mem_size, int line_len) {
  }
 
 void display_msg(message_t* msg) {
-    printf("function type=%d\t", msg->func);
+    printf("function_type=%d\t", msg->func);
     printf("pinum=%d\t", msg->pinum);
     printf("inum=%d\n", msg->inum);
     printf("offset=%d\t", msg->offset);
     printf("nbyte=%d\t", msg->nbytes);
     printf("type=%d\n",msg->type);
     printf("stat.type=%d\tstat.size=%d\n", msg->stat.type, msg->stat.size);
-    printf("3.name=%s", msg->name);
-    printf("4.buffer=\n");  display_mem(msg->buffer, UFS_BLOCK_SIZE, 8);    
+    printf("rt=%d\n", msg->rt);
+    printf("name=%s\n", msg->name);
+    printf("buffer=\n");  //display_mem(msg->buffer, UFS_BLOCK_SIZE, 8);    
     return;        
 }
 

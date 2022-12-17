@@ -26,6 +26,7 @@ MFS_Instr_t *retInstr;
 
 //method to send instruction to the server
 int sendInstruction(MFS_Instr_t *instr){
+    retInstr = (MFS_Instr_t *)calloc(sizeof(MFS_Instr_t), 1);
     int retval;
     do{
         fd_set rfds;
@@ -71,8 +72,8 @@ int MFS_Init(char *hostname, int port){
 }
 
 int MFS_Lookup(int pinum, char *name){
-    MFS_Instr_t *instr = NULL;
-    instr->type = LOOKUP;
+    MFS_Instr_t *instr = (MFS_Instr_t *)calloc(sizeof(MFS_Instr_t), 1);
+    instr->insType = LOOKUP;
     instr->pinum = pinum;
     memcpy(instr->name, name, 28);
 
@@ -83,15 +84,15 @@ int MFS_Lookup(int pinum, char *name){
     return -1;
 }
 
-int MFS_Stat(int inum, MFS_Stat_t *m){
-    MFS_Instr_t *instr = NULL;
-    instr->type = STAT;
+int MFS_Stat(int inum, MFS_Stat_t *stat){
+    MFS_Instr_t *instr = (MFS_Instr_t *)calloc(sizeof(MFS_Instr_t), 1);
+    instr->insType = STAT;
     instr->inum = inum;
 
     int rc = sendInstruction(instr);
     if (rc == 1){
         if(retInstr->returnVal == 0){
-            memcpy(m, &(retInstr->stat), sizeof(MFS_Stat_t));
+            memcpy(stat, &(retInstr->stat), sizeof(MFS_Stat_t));
             return 0;
         }
     }
@@ -99,8 +100,8 @@ int MFS_Stat(int inum, MFS_Stat_t *m){
 }
 
 int MFS_Write(int inum, char *buffer, int offset, int nbytes){
-    MFS_Instr_t *instr = NULL;
-    instr->type = WRITE;
+    MFS_Instr_t *instr = (MFS_Instr_t *)calloc(sizeof(MFS_Instr_t), 1);
+    instr->insType = WRITE;
     instr->inum = inum;
     memcpy(instr->buffer, buffer, 4096);
     instr->offset = offset;
@@ -115,8 +116,8 @@ int MFS_Write(int inum, char *buffer, int offset, int nbytes){
 }
 
 int MFS_Read(int inum, char *buffer, int offset, int nbytes){
-    MFS_Instr_t *instr = NULL;
-    instr->type = READ;
+    MFS_Instr_t *instr = (MFS_Instr_t *)calloc(sizeof(MFS_Instr_t), 1);
+    instr->insType = READ;
     instr->inum = inum;
     memcpy(instr->buffer, buffer, 4096);
     instr->offset = offset;
@@ -134,8 +135,8 @@ int MFS_Read(int inum, char *buffer, int offset, int nbytes){
 }
 
 int MFS_Creat(int pinum, int type, char *name){
-    MFS_Instr_t *instr = NULL;
-    instr->type = CREATE;
+    MFS_Instr_t *instr = (MFS_Instr_t *)calloc(sizeof(MFS_Instr_t), 1);
+    instr->insType = CREATE;
     instr->pinum = pinum;
     instr->type = type;
     memcpy(instr->name, name, 28);
@@ -148,8 +149,8 @@ int MFS_Creat(int pinum, int type, char *name){
 }
 
 int MFS_Unlink(int pinum, char *name){
-    MFS_Instr_t *instr = NULL;
-    instr->type = UNLINK;
+    MFS_Instr_t *instr = (MFS_Instr_t *)calloc(sizeof(MFS_Instr_t), 1);
+    instr->insType = UNLINK;
     instr->pinum = pinum;
     memcpy(instr->name, name, 4096);
 
@@ -161,8 +162,8 @@ int MFS_Unlink(int pinum, char *name){
 }
 
 int MFS_Shutdown(){
-    MFS_Instr_t *instr = NULL;
-    instr->type = SHUTDOWN;
+    MFS_Instr_t *instr = (MFS_Instr_t *)calloc(sizeof(MFS_Instr_t), 1);
+    instr->insType = SHUTDOWN;
 
     int rc = sendInstruction(instr);
     if (rc == 1){
