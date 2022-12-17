@@ -132,7 +132,7 @@ int sendInstruction(MFS_Instr_t *instr){
             rc = UDP_Read(sdClient, &addrRcv, (char *)retInstr, sizeof(MFS_Instr_t));
             if(rc == sizeof(MFS_Instr_t)) {
             printf("\n\nclient :: receive passage\n");
-            display_msg(instr, instr->nbytes);
+            display_msg(retInstr, instr->nbytes);
             printf("\n\n");
         }
             return 1;
