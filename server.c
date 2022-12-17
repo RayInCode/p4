@@ -236,8 +236,9 @@ int main(int argc, char* argv[]) {
                 printf("\nserver:: reply message.\n");
                 display_msg(&reply);
                 #endif
+                exit(0);
+                
                 break;
-
             default:
                 break;
         }
