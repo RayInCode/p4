@@ -32,4 +32,4 @@ debug: client server mkfs
 	rm debug.img; ./mkfs -f debug.img;
 
 clean:
-	-rm -f $(OBJS) server client mkfs libmfs.so *.img *.o *~
+	-rm -f $(OBJS) server client mkfs libmfs.so  *.o *~
