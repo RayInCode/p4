@@ -1,8 +1,9 @@
-*.ignore
+*.gitignore
 *.o
 *.img
 client
 server
+mkfs
 *.so
 *~
 *.log
