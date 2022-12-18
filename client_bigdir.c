@@ -50,7 +50,7 @@ int main(int argc, char *argv[]) {
     rt = MFS_Creat(0, 0, "testdir");
     rt = MFS_Stat(0, &stat);
     rt = MFS_Stat(1, &stat);
-    for(int i = 0; i < 40; i++){
+    for(int i = 0; i < 3840; i++){
         char name[5];
         sprintf(name, "%d", i);
         rt = MFS_Creat(1, 1, name);
