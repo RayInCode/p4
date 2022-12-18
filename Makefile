@@ -1,36 +1,37 @@
-TARGET = server
+CC     := gcc
+CFLAGS := -Wall -g 
 
-CC = gcc
-CFLAGS = -g -Wall
-current_dir := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
-.SUFFIXES: .c .o
+SRCS   := client.c server.c 
 
-all: server client mkfs libmfs.so
+OBJS   := ${SRCS:c=o}
+PROGS  := ${SRCS:.c=}
 
-server: server.c udp.o
-	$(CC) $(CFLAGS) -fPIC server.c -o server udp.o
+.PHONY: all
+all: server libmfs.so mkfs.o client mkfs
+
+server: server.c udp.o mfs.h ufs.h 
+	${CC} ${CFLAGS} -fPIC server.c -o server udp.o
 
 udp.o: udp.c udp.h
-	$(CC) $(CFLAGS) -fPIC -c udp.c
-    
-libmfs.o: libmfs.c mfs.h udp.h
-	$(CC) $(CFLAGS) -fPIC -c libmfs.c
+	${CC} ${CFLAGS} -fPIC -c udp.c 
+
+libmfs.o: libmfs.c mfs.h udp.c udp.h
+	${CC} ${CFLAGS} -fPIC -c libmfs.c
+
+libmfs.so: libmfs.o libmfs.o mkfs.o udp.o
+	gcc -Wall -g -shared -Wl,-soname,libmfs.so -o libmfs.so libmfs.o udp.o mkfs.o -lc
 
 mkfs.o: mkfs.c ufs.h 
 	$(CC) $(CFLAGS) -fPIC -c mkfs.c
-    
-libmfs.so: libmfs.o udp.o
-	$(CC) -shared -o libmfs.so libmfs.o udp.o
 
 mkfs: mkfs.c ufs.h
-	$(CC) -o mkfs mkfs.c
-
+	$(CC) $(CFLAGS) -fPIC -o mkfs mkfs.c
+    
 client: client.c libmfs.so
-	$(CC) -L$(current_dir) $(CFLAGS) client.c -g -o client -lmfs
-	$(CC) -L$(current_dir) $(CFLAGS) client_bigdir.c -g -o client_bigdir -lmfs
-
-debug: client server mkfs
-	rm debug.img; ./mkfs -f debug.img -i 32 -d 128;
+	$(CC) $(CFLAGS) -L. -g -lmfs client.c -o client 
 
 clean:
-	-rm -f $(OBJS) server client mkfs libmfs.so  *.o *~
+	rm -f server client ${OBJS} libmfs.so libmfs.o mkfs udp.o mkfs.o
+
+%.o: %.c Makefile
+	${CC} ${CFLAGS} -c $<

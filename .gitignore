@@ -10,3 +10,4 @@ mkfs
 *.log
 mkfs
 test_*
+.__*
