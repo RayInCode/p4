@@ -82,6 +82,7 @@ super_t super;
 super_t *super_ptr;
 bitmap_t *inode_bitmap_ptr, *data_bitmap_ptr;
 inode_block *inode_table_ptr;
+dir_block_t *data_region_ptr;
 
 int main(int argc, char* argv[]) {
     signal(SIGINT, intHandler);
@@ -115,27 +116,12 @@ int main(int argc, char* argv[]) {
     }
 
     total_blocks = super.data_region_addr + super.num_data; 
-    super_ptr = (super_t *)mmap(NULL, super.data_region_addr * UFS_BLOCK_SIZE, PROT_WRITE, MAP_PRIVATE, fd_img, 0);
+    super_ptr = (super_t *)mmap(NULL, (super.data_region_addr + super.data_region_len) * UFS_BLOCK_SIZE, PROT_WRITE, MAP_PRIVATE, fd_img, 0);
     inode_bitmap_ptr = (bitmap_t *)super_ptr + 1;
     data_bitmap_ptr = inode_bitmap_ptr + super.inode_bitmap_len;
     inode_table_ptr = (inode_block *)(data_bitmap_ptr + super.data_bitmap_len);
+    data_region_ptr = (dir_block_t *)(data_bitmap_ptr + super.inode_region_len);
 
-    // check super in mmap
-    #ifdef DEBUG
-    printf("total blocks        %d\n", 1 + super.inode_bitmap_len + super.data_bitmap_len + super.inode_region_len + super.data_region_len);
-    printf("  inodes            %d [size of each: %lu]\n", super.num_inodes, sizeof(inode_t));
-    printf("  data blocks       %d\n", super.num_data);
-    printf("layout details\n");
-    printf("  inode bitmap address/len %d [%d]\n", super.inode_bitmap_addr, super.inode_bitmap_len);
-    printf("  data bitmap address/len  %d [%d]\n", super.data_bitmap_addr, super.data_bitmap_len);
-
-    // assert(super.num_data == super.num_data);
-    // assert(super.num_inodes == super.num_inodes);
-    // assert(inode_bitmap_ptr->bits[0] == (0x1 << 31));
-    // assert(data_bitmap_ptr->bits[0] == 0x1 << 31);
-    // assert(inode_table_ptr->inodes[0].type == 0 && inode_table_ptr->inodes[0].size == 2 * sizeof(dir_ent_t) && inode_table_ptr->inodes[0].direct[0] == super.data_region_addr);
-    #endif
-    
     // set up UDP socket file and bind with a socket address (port, internet address)
     sd = UDP_Open(portnum);
     assert(sd > -1);
@@ -383,11 +369,9 @@ int ufs_creat(int parent_inum, int type, char *name) {
     // update inode bitmap in memory
     rc = set_inode_bit(created_inum);
     if(rc == -1) return -1;
-    // update data bitmap in memory
-    rc = set_data_bit(created_dnum);
-    if(rc == -1) return -1;
 
     if(type == UFS_DIRECTORY) {
+        
         // initialize new inode 
         inode_t inode;
         inode.type = type;
@@ -581,7 +565,7 @@ int ufs_write(int inum, char* buffer, int nbytes, int offset) {
     }
     // if inum type is directory, offset and nbytes should align with size of dir_ent_t
     if(target_inode->type == UFS_DIRECTORY) {
-        if(offset % sizeof(dir_block_t) != 0 || nbytes % sizeof(dir_block_t) != 0) {
+        if(offset % sizeof(dir_ent_t) != 0 || nbytes % sizeof(dir_ent_t) != 0) {
             perror("(ufs_write) nbytes or offset does note align wit size of dir_ent_t(32)");
             return -1;
         }
@@ -593,51 +577,31 @@ int ufs_write(int inum, char* buffer, int nbytes, int offset) {
     int start_byte_index = offset % UFS_BLOCK_SIZE;
 
     // Write
-    dir_block_t block_buffer;
     if(start_block_addr == -1) {
         int dnum = find_empty_data_bit();
         if(dnum == -1) {
             perror("(ufs_write) There is no empty data bit");
             return -1;
         }
-        start_block_addr = super.data_region_addr + dnum;
         // update data bitmap in memory
-        set_bit((unsigned int*)(data_bitmap_ptr + dnum/bits_per_block), dnum % bits_per_block);
-        rc = pwrite(fd_img, data_bitmap_ptr + dnum/bits_per_block, UFS_BLOCK_SIZE, (super.data_bitmap_addr + dnum/bits_per_block) * UFS_BLOCK_SIZE);
-        if(rc != UFS_BLOCK_SIZE) {
-            perror("(ufs_write) failed to update data bitmap block into file");
-            return -1;
-        }    
+        rc = set_data_bit(dnum);
+
         // update inode direct in memory
+        start_block_addr = super.data_region_addr + dnum;
         target_inode->direct[start_direct_index] = start_block_addr;
     }
-    rc = pread(fd_img, &block_buffer, UFS_BLOCK_SIZE, start_block_addr * UFS_BLOCK_SIZE);
-    if(rc != UFS_BLOCK_SIZE) {
-        perror("(ufs_write) failed to read first data block");
-        return -1;
-    }
-    char* curr_dest_ptr = (char *)&block_buffer + start_byte_index;
+
+    dir_block_t *dest_block = (dir_block_t* )super_ptr + start_block_addr;
+    char* curr_dest_ptr = (char *)dest_block + start_byte_index;
     char* curr_src_ptr = buffer;
     
     if(start_byte_index + nbytes <= UFS_BLOCK_SIZE) {
         // write zone just within first block
         memcpy(curr_dest_ptr, curr_src_ptr, nbytes);
-        // update the modified data block into img file
-        rc = pwrite(fd_img, &block_buffer, UFS_BLOCK_SIZE, start_block_addr * UFS_BLOCK_SIZE);
-        if(rc != UFS_BLOCK_SIZE) {
-            perror("(ufs_write) failed to update the modified data block into img file");
-            return -1;
-        }
     }
     else {
         // write zone spans two blocks
-        memcpy(curr_dest_ptr, curr_src_ptr, UFS_BLOCK_SIZE - start_byte_index);
-        // update the modified data block into img file
-        rc = pwrite(fd_img, &block_buffer, UFS_BLOCK_SIZE, start_block_addr * UFS_BLOCK_SIZE);
-        if(rc != UFS_BLOCK_SIZE) {
-            perror("(ufs_write) failed to update the modified data block into img file");
-            return -1;
-        }        
+        memcpy(curr_dest_ptr, curr_src_ptr, UFS_BLOCK_SIZE - start_byte_index);       
         int next_block_addr = target_inode->direct[(start_direct_index + 1) % 30];
         // need to apply for a new data block 
         if(next_block_addr == -1) {
@@ -648,39 +612,23 @@ int ufs_write(int inum, char* buffer, int nbytes, int offset) {
             }
             next_block_addr = super.data_region_addr + dnum;
             // update data bitmap in memory
-            set_bit((unsigned int*)(data_bitmap_ptr + dnum/bits_per_block), dnum % bits_per_block);
-            rc = pwrite(fd_img, data_bitmap_ptr + dnum/bits_per_block, UFS_BLOCK_SIZE, (super.data_bitmap_addr + dnum/bits_per_block) * UFS_BLOCK_SIZE);
-            if(rc != UFS_BLOCK_SIZE) {
-                perror("(ufs_write) failed to update data bitmap block into file");
-                return -1;
-            }    
+            rc = set_data_bit(dnum);
             // update inode direct in memory
-            target_inode->direct[start_direct_index] = next_block_addr;           
+            target_inode->direct[(start_direct_index + 1) % 30] = next_block_addr;           
         }
-        rc = pread(fd_img, &block_buffer, UFS_BLOCK_SIZE, next_block_addr * UFS_BLOCK_SIZE);
-        if(rc != UFS_BLOCK_SIZE) {
-            perror("(ufs_write) failed to read first data block");
-            return -1;
-        }
-        curr_dest_ptr = (char *)&block_buffer;
+
+        curr_dest_ptr = (char *)(dest_block + 1);
         curr_src_ptr += UFS_BLOCK_SIZE - start_byte_index;
         nbytes -= UFS_BLOCK_SIZE - start_byte_index;
         memcpy(curr_dest_ptr, curr_src_ptr, nbytes);
-        // update the modified data block into img file
-        rc = pwrite(fd_img, &block_buffer, UFS_BLOCK_SIZE, next_block_addr * UFS_BLOCK_SIZE);
-        if(rc != UFS_BLOCK_SIZE) {
-            perror("(ufs_write) failed to update the modified data block into img file");
-            return -1;
-        }
     }
 
     // update the size of inode
     target_inode->size = (offset+nbytes > target_inode->size)? (offset + nbytes) : target_inode->size;
 
-    // update target inode into img file
-    rc = pwrite(fd_img, target_inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + inum * sizeof(inode_t));
+    rc = pwrite(fd_img, super_ptr, total_blocks * UFS_BLOCK_SIZE, 0);
     if(rc < 0) {
-        perror("(ufs_write) failed to update target inode into file");
+        perror("(ufs_write) failed to update fs into file");
         return -1;
     } 
 

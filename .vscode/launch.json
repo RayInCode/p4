@@ -9,15 +9,15 @@
         "args": ["10000", "debug.img"],
         "stopAtEntry": false,
         "externalConsole": false,
-        "cwd": "/home/mhdhyl/537/p4",
+        "cwd": "/home/lei/537/p4",
         // "program": "/home/mhdhyl/537/p4/client",
-        "program": "/home/mhdhyl/537/p4/server",
+        "program": "/home/lei/537/p4/server",
         "MIMode": "gdb",
         "miDebuggerPath": "gdb",
         "environment": [
             {
                 "name": "LD_LIBRARY_PATH",
-                "value": "/home/mhdhyl/537/p4"
+                "value": "/home/lei/537/p4"
             }
         ],
         "setupCommands": [
