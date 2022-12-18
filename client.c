@@ -66,14 +66,14 @@ int main(int argc, char *argv[]) {
             name = strtok_r(rest, "\"", &rest);
             name = trim(strtok_r(rest, "\"", &rest));
             rt = MFS_Lookup(pinum, name);
-            printf("client:: got reply\nrt = %d\n", rt);
+            //printf("client:: got reply\nrt = %d\n", rt);
         }
         
         else if(!strcmp(func_name, "stat")){
             int inum = atoi(trim(strtok_r(rest, "&", &rest)));
             MFS_Stat_t stat = {.type = -1, .size = -1};
             rt = MFS_Stat(inum, &stat);
-            printf("client:: got reply\nrt = %d\nstat.type = %d;  stat.size = %d\n", rt, stat.type, stat.size);
+            //printf("client:: got reply\nrt = %d\nstat.type = %d;  stat.size = %d\n", rt, stat.type, stat.size);
         }
         
         else if(!strcmp(func_name, "write")){
@@ -85,7 +85,7 @@ int main(int argc, char *argv[]) {
             int size = atoi(trim(strtok_r(rest, "&", &rest)));
             int offset = atoi(trim(strtok_r(rest, "&", &rest)));
             rt = MFS_Write(inum, wbuffer, offset, size);
-            printf("client:: got reply\nrt = %d\n", rt);
+            //printf("client:: got reply\nrt = %d\n", rt);
         }
         
         else if(!strcmp(func_name, "read")){
@@ -94,7 +94,7 @@ int main(int argc, char *argv[]) {
             int offset = atoi(trim(strtok_r(rest, "&", &rest)));
             char *buffer = (char *)calloc(size + 1, 1);
             rt = MFS_Read(inum, buffer, offset, size);
-            printf("client:: got reply\nrt = %d\n", rt);
+            //printf("client:: got reply\nrt = %d\n", rt);
         }
         
         else if(!strcmp(func_name, "creat")){
@@ -105,7 +105,7 @@ int main(int argc, char *argv[]) {
             name = strtok_r(rest, "\"", &rest);
             name = trim(strtok_r(rest, "\"", &rest));
             rt = MFS_Creat(pinum, type, name);
-            printf("client:: got reply\nrt = %d\n", rt);
+            //printf("client:: got reply\nrt = %d\n", rt);
         }
         
         else if(!strcmp(func_name, "unlink")){
@@ -115,12 +115,12 @@ int main(int argc, char *argv[]) {
             name = strtok_r(rest, "\"", &rest);
             name = trim(strtok_r(rest, "\"", &rest));
             rt = MFS_Unlink(pinum, name);
-            printf("client:: got reply\nrt = %d\n", rt);
+            //printf("client:: got reply\nrt = %d\n", rt);
         }
         
         else if(!strcmp(func_name, "shutdown")){
             rt = MFS_Shutdown();
-            printf("client:: got reply\nrt = %d\n", rt);
+            //printf("client:: got reply\nrt = %d\n", rt);
         }
         
         else {

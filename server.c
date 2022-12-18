@@ -293,19 +293,17 @@ int ufs_lookup(int parent_inum, char *name) {
     return -1;
 }
 
-int ufs_stat(int parent_inum, stat_t* stat) {
+int ufs_stat(int inum, stat_t* stat) {
     // check parent_inum
-    if(parent_inum < 0 || parent_inum >= super.num_inodes || get_bit((inode_bitmap_ptr + parent_inum/bits_per_block)->bits, parent_inum % bits_per_block) == 0) {
+    if(inum < 0 || inum >= super.num_inodes || get_bit((inode_bitmap_ptr + inum/bits_per_block)->bits, inum % bits_per_block) == 0) {
         return -1;
     }
 
     // address inode region block and index
-    inode_block* target_inode_block = inode_table_ptr + (parent_inum/inodes_per_blocks);
-    int index = parent_inum % inodes_per_blocks;
+    inode_t target_inode = inode_table_ptr->inodes[inum];
 
-
-    stat->type = target_inode_block->inodes[index].type;
-    stat->size = target_inode_block->inodes[index].size;
+    stat->type = target_inode.type;
+    stat->size = target_inode.size;
     return 0;
 }
 
@@ -316,10 +314,10 @@ int ufs_creat(int parent_inum, int type, char *name) {
         return -1;
 
     // address partent_inode
-    inode_t parent_inode = inode_table_ptr->inodes[parent_inum];
+    inode_t *parent_inode = &(inode_table_ptr->inodes[parent_inum]);
 
     //check if parent inode is directory
-    if(parent_inode.type != UFS_DIRECTORY)
+    if(parent_inode->type != UFS_DIRECTORY)
         return -1; 
 
     //check length of name
@@ -332,7 +330,7 @@ int ufs_creat(int parent_inum, int type, char *name) {
     int index_dir_ent = -1;
     int index_direct = -1;
     for(int i = 0; i < 30; i++){
-        dir_block_addr = parent_inode.direct[i];
+        dir_block_addr = parent_inode->direct[i];
         if(dir_block_addr == -1){
             // if all assigened direct blocks of parent ara full
             if (index_dir_ent == -1 && index_direct == -1){
@@ -348,7 +346,7 @@ int ufs_creat(int parent_inum, int type, char *name) {
                 return -1;
   
             // update parent inode direct[] in memory
-            parent_inode.direct[i] = super.data_region_addr + dnum;
+            parent_inode->direct[i] = super.data_region_addr + dnum;
             index_direct = i;
             index_dir_ent = 0;
             }
@@ -447,16 +445,12 @@ int ufs_creat(int parent_inum, int type, char *name) {
         }
     }
 
-    // update parent inode's size
-    if(index_dir_ent*UFS_BLOCK_SIZE + index_dir_ent*sizeof(dir_ent_t) == parent_inode.size)
-        parent_inode.size += sizeof(dir_ent_t);
-    rc = pwrite(fd_img, &parent_inode, sizeof(inode_t), super.inode_region_addr * UFS_BLOCK_SIZE + parent_inum * sizeof(inode_t));
-    if(rc < 0){
-        perror("(ufs_creat)failed to write parent's inode into img file to update its size");
-        return -1;
-    }
-    // update parent inode's direntry entry
-    dir_block_addr = parent_inode.direct[index_direct];
+    // update parent inode's size in memory
+    if(index_direct*UFS_BLOCK_SIZE + index_dir_ent*sizeof(dir_ent_t) == parent_inode->size)
+        parent_inode->size += sizeof(dir_ent_t);
+
+    // update parent inode's direntry entry to file
+    dir_block_addr = parent_inode->direct[index_direct];
     rc = get_dir_block(dir_block_addr, &dir_block);
     if(rc < 0){
         perror("(ufs_creat)failed to get_dir_block for updating parents' directory block");

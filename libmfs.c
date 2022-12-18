@@ -184,7 +184,6 @@ int MFS_Stat(int inum, MFS_Stat_t *stat){
     if (rc == 1){
         if(retInstr->returnVal == 0){
             memcpy(stat, &(retInstr->stat), sizeof(MFS_Stat_t));
-            printf("real stat.size = %d\n", stat->size);
             return 0;
         }
     }
