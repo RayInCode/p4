@@ -13,9 +13,9 @@
 #include "ufs.h"
 #include "mfs.h"
 
-#ifndef DEBUG
-#define DEBUG
-#endif
+// #ifndef DEBUG
+// #define DEBUG
+// #endif
 
 // #ifndef REGION
 // #define REGION
@@ -136,7 +136,10 @@ int main(int argc, char* argv[]) {
         assert(rc == sizeof(message_t));
 
         printf("\nserver:: read message.\n");
+        
+        #ifdef DEBUG
         display_msg(&message, message.nbytes);
+        #endif
 
         switch (message.func)
         {

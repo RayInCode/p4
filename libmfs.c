@@ -7,6 +7,10 @@
 
 #define BUFFER_SIZE (1000)
 
+// #ifndef DEBUG
+// #define DEBUG
+// #endif
+
 int sdClient;
 struct sockaddr_in addrSnd, addrRcv;
 enum instrType{LOOKUP, STAT, WRITE, READ, CREATE, UNLINK, SHUTDOWN};
@@ -119,9 +123,11 @@ int sendInstruction(MFS_Instr_t *instr){
 
         int rc = UDP_Write(sdClient, &addrSnd, (char *)instr, sizeof(MFS_Instr_t));
         if(rc == sizeof(MFS_Instr_t)) {
+            #ifdef DEBUG
             printf("\n\nclient :: send passage\n");
             display_msg(instr, instr->nbytes);
             printf("\n\n");
+            #endif DEBUG
         }
         retval = select(sdClient + 1, &rfds, NULL, NULL, &tv);
         if (retval == -1){
@@ -131,9 +137,12 @@ int sendInstruction(MFS_Instr_t *instr){
         if (retval == 1){
             rc = UDP_Read(sdClient, &addrRcv, (char *)retInstr, sizeof(MFS_Instr_t));
             if(rc == sizeof(MFS_Instr_t)) {
+            
+            #ifdef DEBUG
             printf("\n\nclient :: receive passage\n");
             display_msg(retInstr, instr->nbytes);
             printf("\n\n");
+            #endif
         }
             return 1;
         }
@@ -151,7 +160,9 @@ int MFS_Init(char *hostname, int port){
     int port_num = (rand() % (MAX_PORT - MIN_PORT) + MIN_PORT);
 
     // Bind random client port number
-    sdClient = UDP_Open(port_num);
+    sdClient = -1;
+    while(sdClient < 0) 
+        sdClient = UDP_Open(port_num);
     assert(sdClient > -1);
 
     int rc = UDP_FillSockAddr(&addrSnd, hostname, port);
@@ -184,6 +195,7 @@ int MFS_Stat(int inum, MFS_Stat_t *stat){
     if (rc == 1){
         if(retInstr->returnVal == 0){
             memcpy(stat, &(retInstr->stat), sizeof(MFS_Stat_t));
+            printf("real stat.size = %d\n", stat->size);
             return 0;
         }
     }
