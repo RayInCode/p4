@@ -369,9 +369,11 @@ int ufs_creat(int parent_inum, int type, char *name) {
     // update inode bitmap in memory
     rc = set_inode_bit(created_inum);
     if(rc == -1) return -1;
+    // update data bitmap in memory
+    rc = set_data_bit(created_dnum);
+    if(rc == -1) return -1;
 
     if(type == UFS_DIRECTORY) {
-        
         // initialize new inode 
         inode_t inode;
         inode.type = type;
