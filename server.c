@@ -13,9 +13,9 @@
 #include "ufs.h"
 #include "mfs.h"
 
-#ifndef DEBUG
-#define DEBUG
-#endif
+// #ifndef DEBUG
+// #define DEBUG
+// #endif
 
 // #ifndef REGION
 // #define REGION
@@ -129,14 +129,16 @@ int main(int argc, char* argv[]) {
     message_t message, reply;
 
     while(1) {
-        printf("\nserver:: waiting...\n");
+        //printf("\nserver:: waiting...\n");
         memset(&message, 0, sizeof(message_t));
         memset(&reply, 0, sizeof(message_t));
         rc = UDP_Read(sd, &addr, (char*)&message, sizeof(message_t));
         assert(rc == sizeof(message_t));
 
-        printf("\nserver:: read message.\n");
+        //printf("\nserver:: read message.\n");
+        #ifdef DEBUG
         display_msg(&message, message.nbytes);
+        #endif
 
         switch (message.func)
         {

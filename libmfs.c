@@ -7,6 +7,10 @@
 
 #define BUFFER_SIZE (1000)
 
+// #ifndef DEBUG
+// #define DEBUG
+// #endif
+
 int sdClient;
 struct sockaddr_in addrSnd, addrRcv;
 enum instrType{LOOKUP, STAT, WRITE, READ, CREATE, UNLINK, SHUTDOWN};
@@ -119,9 +123,12 @@ int sendInstruction(MFS_Instr_t *instr){
 
         int rc = UDP_Write(sdClient, &addrSnd, (char *)instr, sizeof(MFS_Instr_t));
         if(rc == sizeof(MFS_Instr_t)) {
+            
+            #ifdef DEBUG
             printf("\n\nclient :: send passage\n");
             display_msg(instr, instr->nbytes);
             printf("\n\n");
+            #endif
         }
         retval = select(sdClient + 1, &rfds, NULL, NULL, &tv);
         if (retval == -1){
@@ -131,9 +138,11 @@ int sendInstruction(MFS_Instr_t *instr){
         if (retval == 1){
             rc = UDP_Read(sdClient, &addrRcv, (char *)retInstr, sizeof(MFS_Instr_t));
             if(rc == sizeof(MFS_Instr_t)) {
+            #ifdef DEBUG
             printf("\n\nclient :: receive passage\n");
             display_msg(retInstr, instr->nbytes);
             printf("\n\n");
+            #endif
         }
             return 1;
         }
