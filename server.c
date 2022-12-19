@@ -55,11 +55,14 @@ typedef struct {
 
 unsigned int get_bit(unsigned int *, int);
 void set_bit(unsigned int *, int);
+void reset_bit(unsigned int *, int);
 int get_dir_block(int, dir_block_t*);
 int find_empty_inode_bit();
 int find_empty_data_bit();
 int set_inode_bit(int);
 int set_data_bit(int);
+int reset_inode_bit(int);
+int reset_data_bit(int);
 void display_msg(message_t *, int);
 void intHandler(int);
 int isEmptyDir(int);
@@ -322,21 +325,29 @@ int ufs_creat(int parent_inum, int type, char *name) {
         if(dir_block_addr == -1){
             // if all assigened direct blocks of parent ara full
             if (index_dir_ent == -1 && index_direct == -1){
-            int dnum = find_empty_data_bit();
-            if(dnum == -1) {
-                printf("(ufs_create) There is no empty data bit for new dir_block");
-                return -1;
-            }
+                int dnum = find_empty_data_bit();
+                if(dnum == -1) {
+                    printf("(ufs_create) There is no empty data bit for new dir_block");
+                    return -1;
+                }
 
-            // update data bitmap in memory
-            rc = set_data_bit(dnum);
-            if(rc < 0)
-                return -1;
-  
-            // update parent inode direct[] in memory
-            parent_inode->direct[i] = super.data_region_addr + dnum;
-            index_direct = i;
-            index_dir_ent = 0;
+                // update data bitmap in memory
+                rc = set_data_bit(dnum);
+                if(rc < 0)
+                    return -1;                
+
+                // initialize that block
+                dir_block_t *new_block_ptr = data_region_ptr + dnum;
+                for(int i = 0; i < 128; i++) {
+                    new_block_ptr->entries[i].inum = -1;
+                }
+    
+                // update parent inode direct[] in memory
+                parent_inode->direct[i] = super.data_region_addr + dnum;
+                index_direct = i;
+                index_dir_ent = 0;
+
+
             }
             break;
         }
@@ -488,10 +499,14 @@ int ufs_unlink(int parent_inum, char *name) {
     if(isEmptyDir(unlink_inum) == -1)
         return -1;
 
+    // free target inode bit
+    rc = reset_inode_bit(unlink_inum);
+
     // update parent inode's direntry entry
     dir_block_addr = parent_inode_block->inodes[index].direct[index_direct];
     dir_block_t *dir_block_ptr = (dir_block_t *)super_ptr + dir_block_addr;
     dir_block_ptr->entries[index_dir_ent].inum = -1;
+
 
     // update file system into img file
     rc = pwrite(fd_img, super_ptr, UFS_BLOCK_SIZE * total_blocks, 0);
@@ -516,7 +531,7 @@ int ufs_write(int inum, char* buffer, int nbytes, int offset) {
         return -1;
     }
     // check offset
-    if(offset < 0 || offset > target_inode->size) {
+    if(offset < 0) {
         perror("(ufs_write) invalid offset");
         return -1;
     }
@@ -700,6 +715,11 @@ void set_bit(unsigned int *bitmap, int position) {
     bitmap[index] |= 0x1 << offset;
 }
 
+void reset_bit(unsigned int *bitmap, int position) {
+    int index = position / 32;
+    int offset = 31 - (position % 32);
+    bitmap[index] &= ~(0x1 << offset);
+}
 
 int get_dir_block(int block_addr, dir_block_t* dir_block) {
     // check block bounds and data bitmaps
@@ -775,6 +795,29 @@ int set_data_bit(int dnum) {
     return 0;
 }
 
+int reset_inode_bit(int inum) {
+    // check inum
+    if(inum < 0 || inum >= super.num_inodes)
+        return -1;
+    
+    bitmap_t *target_inode_bitmap = inode_bitmap_ptr + (inum / bits_per_block);
+    int positon = inum % bits_per_block;
+
+    reset_bit((unsigned int *)target_inode_bitmap, positon);
+    return 0;
+}
+
+int reset_data_bit(int dnum) {
+    // check dnum
+    if(dnum < 0 || dnum >= super.num_data)
+        return -1;
+    
+    bitmap_t *target_data_bitmap = data_bitmap_ptr + (dnum / bits_per_block);
+    int positon = dnum % bits_per_block;
+
+    reset_bit((unsigned int *)target_data_bitmap, positon);
+    return 0;
+}
 
 void display_mem(void* mem, int mem_size, int line_len) {
    /*
